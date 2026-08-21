@@ -1,28 +1,25 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { useProductos } from '../context/ProductosContext';
 
-const productos = [
-  { id: '1', nombre: 'Alfajor de maicena', categoria: 'Alfajores' },
-  { id: '2', nombre: 'Alfajor de chocolate', categoria: 'Alfajores' },
-  { id: '3', nombre: 'Alfajor triple', categoria: 'Alfajores' },
-  { id: '4', nombre: 'Chocolate con almendras', categoria: 'Chocolates' },
-  { id: '5', nombre: 'Chocolate blanco', categoria: 'Chocolates' },
-  { id: '6', nombre: 'Chocolate amargo 70%', categoria: 'Chocolates' },
-  { id: '7', nombre: 'Caramelos de miel', categoria: 'Caramelos' },
-  { id: '8', nombre: 'Caramelos surtidos', categoria: 'Caramelos' },
-  { id: '9', nombre: 'Bombones surtidos', categoria: 'Bombones' },
-  { id: '10', nombre: 'Bombones de licor', categoria: 'Bombones' },
-];
+export default function HomeScreen({ navigation }) {
+  const { productos, cargando } = useProductos();
 
-// Agrupa los productos por categoría automáticamente
-const categorias = productos.reduce((acc, prod) => {
-  if (!acc[prod.categoria]) acc[prod.categoria] = [];
-  acc[prod.categoria].push(prod);
-  return acc;
-}, {});
+  if (cargando) {
+    return (
+      <View style={styles.centrado}>
+        <Text>Cargando productos...</Text>
+      </View>
+    );
+  }
 
-export default function HomeScreen() {
-  const alertaProceso = () => Alert.alert("En proceso", "Esta sección estará lista pronto.");
+  const categorias = productos.reduce((acc, prod) => {
+    if (!acc[prod.categoria]) acc[prod.categoria] = [];
+    acc[prod.categoria].push(prod);
+    return acc;
+  }, {});
+
+  const irADetalle = (producto) => navigation.navigate('DetalleProducto', { producto });
 
   return (
     <ScrollView style={styles.container}>
@@ -30,16 +27,17 @@ export default function HomeScreen() {
 
       <Text style={styles.tituloSeccion}>Ofertas del día</Text>
       <View style={styles.fila}>
-        <View style={styles.card}>
-          <Text>Foto</Text>
-          <Text>[Nombre Prod]</Text>
-          <TouchableOpacity style={styles.boton} onPress={alertaProceso}><Text>Agregar</Text></TouchableOpacity>
-        </View>
-        <View style={styles.card}>
-          <Text>Foto</Text>
-          <Text>[Nombre Prod]</Text>
-          <TouchableOpacity style={styles.boton} onPress={alertaProceso}><Text>Agregar</Text></TouchableOpacity>
-        </View>
+        {productos.slice(0, 2).map((prod) => (
+          <TouchableOpacity key={prod.id} style={styles.card} onPress={() => irADetalle(prod)}>
+            <View style={styles.fotoPlaceholder}><Text>Foto</Text></View>
+            <Text numberOfLines={1}>{prod.nombre}</Text>
+            <Text style={styles.precio}>${prod.precio}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <View style={styles.bannerPromo}>
+        <Text style={styles.bannerPromoTexto}>Cupón por jugar un juego (tiempo limitado)</Text>
       </View>
 
       {Object.keys(categorias).map((nombreCategoria) => (
@@ -47,13 +45,11 @@ export default function HomeScreen() {
           <Text style={styles.tituloSeccion}>{nombreCategoria}</Text>
           <View style={styles.grid}>
             {categorias[nombreCategoria].map((prod) => (
-              <View key={prod.id} style={styles.cardGrid}>
+              <TouchableOpacity key={prod.id} style={styles.cardGrid} onPress={() => irADetalle(prod)}>
                 <View style={styles.fotoPlaceholder}><Text>Foto</Text></View>
                 <Text style={styles.nombreProd} numberOfLines={2}>{prod.nombre}</Text>
-                <TouchableOpacity style={styles.boton} onPress={alertaProceso}>
-                  <Text>Agregar</Text>
-                </TouchableOpacity>
-              </View>
+                <Text style={styles.precio}>${prod.precio}</Text>
+              </TouchableOpacity>
             ))}
           </View>
         </View>
@@ -64,35 +60,16 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF8E1' },
-  banner: { height: 150, backgroundColor: '#ddd', margin: 10 },
+  centrado: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  banner: { height: 150, backgroundColor: '#ddd', margin: 10, justifyContent: 'center', alignItems: 'center' },
+  bannerPromo: { backgroundColor: '#e57373', margin: 10, padding: 14, borderRadius: 10 },
+  bannerPromoTexto: { color: '#fff', textAlign: 'center', fontWeight: 'bold' },
   tituloSeccion: { fontSize: 18, fontWeight: 'bold', marginLeft: 10, marginTop: 14, marginBottom: 4 },
   fila: { flexDirection: 'row', justifyContent: 'space-around', marginVertical: 10 },
   card: { width: 150, backgroundColor: '#fff', padding: 10, alignItems: 'center', borderRadius: 10 },
-  boton: { backgroundColor: '#ffcc80', padding: 5, marginTop: 5, borderRadius: 5 },
-
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    paddingHorizontal: 10,
-    paddingBottom: 10,
-  },
-  cardGrid: {
-    width: '48%',
-    backgroundColor: '#fff',
-    padding: 10,
-    alignItems: 'center',
-    borderRadius: 10,
-    marginBottom: 12,
-  },
-  fotoPlaceholder: {
-    width: '100%',
-    height: 100,
-    backgroundColor: '#eee',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 6,
-    marginBottom: 6,
-  },
-  nombreProd: { textAlign: 'center', marginBottom: 4 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingHorizontal: 10, paddingBottom: 10 },
+  cardGrid: { width: '48%', backgroundColor: '#fff', padding: 10, alignItems: 'center', borderRadius: 10, marginBottom: 12 },
+  fotoPlaceholder: { width: '100%', height: 100, backgroundColor: '#eee', justifyContent: 'center', alignItems: 'center', borderRadius: 6, marginBottom: 6 },
+  nombreProd: { textAlign: 'center', marginBottom: 2 },
+  precio: { fontWeight: 'bold', color: '#c77b00', marginTop: 2 },
 });

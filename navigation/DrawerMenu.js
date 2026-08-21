@@ -31,6 +31,9 @@ export default function DrawerMenu({ visible, onClose, onNavigate }) {
         <TouchableOpacity style={styles.item} onPress={() => onNavigate('Carrito')}>
           <Text style={styles.itemText}>Carrito</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={styles.item} onPress={() => onNavigate('Admin')}>
+        <Text style={styles.itemText}>Admin</Text>
+        </TouchableOpacity>
       </Animated.View>
     </View>
   );
