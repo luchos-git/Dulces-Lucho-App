@@ -5,8 +5,6 @@ import { TouchableOpacity, Text } from 'react-native';
 import HomeScreen from './screens/HomeScreen';
 import CarritoScreen from './screens/carrito';
 import DetalleProducto from './screens/DetalleProducto';
-import { ProductosProvider } from './context/ProductosContext';
-import AdminScreen from './screens/AdminScreens';
 import DrawerMenu from './navigation/DrawerMenu';
 
 const Stack = createNativeStackNavigator();
@@ -16,36 +14,33 @@ export default function App() {
   const navigationRef = React.useRef(null);
 
   return (
-    <ProductosProvider>
-      <NavigationContainer ref={navigationRef}>
-        <Stack.Navigator
-          screenOptions={{
-            headerRight: () => (
-              <TouchableOpacity onPress={() => setMenuVisible(true)} style={{ paddingHorizontal: 8 }}>
-                <Text style={{ fontSize: 24 }}>☰</Text>
-              </TouchableOpacity>
-            ),
-          }}
-        >
-          <Stack.Screen name="Inicio" component={HomeScreen} />
-          <Stack.Screen name="Carrito" component={CarritoScreen} />
-          <Stack.Screen
-            name="DetalleProducto"
-            component={DetalleProducto}
-            options={({ route }) => ({ title: route.params.producto.nombre })}
-          />
-          <Stack.Screen name="Admin" component={AdminScreen} options={{ title: 'Panel de Admin' }} />
-        </Stack.Navigator>
-
-        <DrawerMenu
-          visible={menuVisible}
-          onClose={() => setMenuVisible(false)}
-          onNavigate={(screen) => {
-            setMenuVisible(false);
-            navigationRef.current?.navigate(screen);
-          }}
+    <NavigationContainer ref={navigationRef}>
+      <Stack.Navigator
+        screenOptions={{
+          headerRight: () => (
+            <TouchableOpacity onPress={() => setMenuVisible(true)} style={{ paddingHorizontal: 8 }}>
+              <Text style={{ fontSize: 24 }}>☰</Text>
+            </TouchableOpacity>
+          ),
+        }}
+      >
+        <Stack.Screen name="Inicio" component={HomeScreen} />
+        <Stack.Screen name="Carrito" component={CarritoScreen} />
+        <Stack.Screen
+          name="DetalleProducto"
+          component={DetalleProducto}
+          options={({ route }) => ({ title: route.params.producto.nombre })}
         />
-      </NavigationContainer>
-    </ProductosProvider>
+      </Stack.Navigator>
+
+      <DrawerMenu
+        visible={menuVisible}
+        onClose={() => setMenuVisible(false)}
+        onNavigate={(screen) => {
+          setMenuVisible(false);
+          navigationRef.current?.navigate(screen);
+        }}
+      />
+    </NavigationContainer>
   );
 }
