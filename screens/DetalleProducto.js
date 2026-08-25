@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { useCarrito } from '../context/CarritoContext';
 
 export default function DetalleProducto({ route }) {
   const { producto } = route.params;
@@ -8,9 +9,12 @@ export default function DetalleProducto({ route }) {
   const sumar = () => setCantidad((c) => c + 1);
   const restar = () => setCantidad((c) => (c > 1 ? c - 1 : 1));
 
-  const agregarAlCarrito = () => {
-    Alert.alert('Agregado', `${cantidad} x ${producto.nombre} agregado al carrito.`);
-  };
+const { agregarAlCarrito: agregarAlCarritoContext } = useCarrito();
+
+const agregarAlCarrito = () => {
+  agregarAlCarritoContext(producto, cantidad);
+  Alert.alert('Agregado', `${cantidad} x ${producto.nombre} agregado al carrito.`);
+};
 
   const comprarAhora = () => {
     Alert.alert('En proceso', 'Esta sección estará lista pronto.');
