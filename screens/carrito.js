@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'rea
 import { useCarrito } from '../context/CarritoContext';
 import { productos } from '../data/productos';
 
-export default function CarritoScreen() {
+export default function CarritoScreen({ navigation }) {
   const { items, quitarDelCarrito, cambiarCantidad, toggleSeleccionado, toggleSeleccionarTodo } = useCarrito();
 
   const todosSeleccionados = items.length > 0 && items.every((i) => i.seleccionado);
@@ -16,6 +16,11 @@ export default function CarritoScreen() {
 
   const prepararCompra = () => Alert.alert('En proceso', 'Esta sección estará lista pronto.');
 
+  const irADetalle = (item) => {
+  const { cantidad, seleccionado, ...producto } = item;
+  navigation.navigate('DetalleProducto', { producto });
+};
+  
   return (
     <ScrollView style={styles.container}>
       {items.length > 0 && (
@@ -32,36 +37,41 @@ export default function CarritoScreen() {
       )}
 
       {items.map((item) => (
-        <View key={item.id} style={styles.filaItem}>
-          <TouchableOpacity onPress={() => toggleSeleccionado(item.id)} style={styles.checkboxWrapper}>
-            <View style={[styles.checkbox, item.seleccionado && styles.checkboxActivo]}>
-              {item.seleccionado && <Text style={styles.check}>✓</Text>}
-            </View>
-          </TouchableOpacity>
+  <TouchableOpacity
+    key={item.id}
+    style={styles.filaItem}
+    activeOpacity={0.8}
+    onPress={() => irADetalle(item)}
+  >
+    <TouchableOpacity onPress={() => toggleSeleccionado(item.id)} style={styles.checkboxWrapper}>
+      <View style={[styles.checkbox, item.seleccionado && styles.checkboxActivo]}>
+        {item.seleccionado && <Text style={styles.check}>✓</Text>}
+      </View>
+    </TouchableOpacity>
 
-          <View style={styles.fotoPlaceholder}><Text>Foto</Text></View>
+    <View style={styles.fotoPlaceholder}><Text>Foto</Text></View>
 
-          <View style={styles.infoItem}>
-            <Text style={styles.nombreItem}>{item.nombre}</Text>
-            <Text style={styles.precioItem}>${item.precio}</Text>
-          </View>
+    <View style={styles.infoItem}>
+      <Text style={styles.nombreItem}>{item.nombre}</Text>
+      <Text style={styles.precioItem}>${item.precio}</Text>
+    </View>
 
-          <View style={styles.controles}>
-            <TouchableOpacity onPress={() => quitarDelCarrito(item.id)}>
-              <Text style={styles.tacho}>🗑️</Text>
-            </TouchableOpacity>
-            <View style={styles.stepper}>
-              <TouchableOpacity style={styles.stepperBoton} onPress={() => cambiarCantidad(item.id, -1)}>
-                <Text style={styles.stepperTexto}>-</Text>
-              </TouchableOpacity>
-              <Text style={styles.cantidadTexto}>{item.cantidad}</Text>
-              <TouchableOpacity style={styles.stepperBoton} onPress={() => cambiarCantidad(item.id, 1)}>
-                <Text style={styles.stepperTexto}>+</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      ))}
+    <View style={styles.controles}>
+      <TouchableOpacity onPress={() => quitarDelCarrito(item.id)}>
+        <Text style={styles.tacho}>🗑️</Text>
+      </TouchableOpacity>
+      <View style={styles.stepper}>
+        <TouchableOpacity style={styles.stepperBoton} onPress={() => cambiarCantidad(item.id, -1)}>
+          <Text style={styles.stepperTexto}>-</Text>
+        </TouchableOpacity>
+        <Text style={styles.cantidadTexto}>{item.cantidad}</Text>
+        <TouchableOpacity style={styles.stepperBoton} onPress={() => cambiarCantidad(item.id, 1)}>
+          <Text style={styles.stepperTexto}>+</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </TouchableOpacity>
+))}
 
       {items.length > 0 && (
         <View style={styles.filaTotal}>
