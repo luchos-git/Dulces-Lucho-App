@@ -7,6 +7,7 @@ import CarritoScreen from './screens/carrito';
 import DetalleProducto from './screens/DetalleProducto';
 import DrawerMenu from './navigation/DrawerMenu';
 import { CarritoProvider } from './context/CarritoContext';
+import PrepararCompra from './screens/prepararCompra';
 
 const Stack = createNativeStackNavigator();
 
@@ -33,6 +34,7 @@ export default function App() {
             component={DetalleProducto}
             options={({ route }) => ({ title: route.params.producto.nombre })}
           />
+          <Stack.Screen name="PrepararCompra" component={PrepararCompra} options={{ title: 'Preparar compra' }} />
         </Stack.Navigator>
 
         <DrawerMenu

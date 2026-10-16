@@ -28,9 +28,11 @@ export function CarritoProvider({ children }) {
     setItems((prev) => prev.map((i) => ({ ...i, seleccionado: !todosSeleccionados })));
   };
 
+  const quitarSeleccionados = () => setItems((prev) => prev.filter((i) => !i.seleccionado));
+
   return (
     <CarritoContext.Provider
-      value={{ items, agregarAlCarrito, quitarDelCarrito, cambiarCantidad, toggleSeleccionado, toggleSeleccionarTodo }}
+      value={{ items, agregarAlCarrito, quitarDelCarrito, cambiarCantidad, toggleSeleccionado, toggleSeleccionarTodo, quitarSeleccionados }}
     >
       {children}
     </CarritoContext.Provider>
