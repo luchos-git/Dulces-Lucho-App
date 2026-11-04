@@ -3,6 +3,9 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert 
 import { cupones } from '../data/cupones';
 import { useCarrito } from '../context/CarritoContext';
 import EntregaEnvio, { useEntrega } from '../components/EntregaEnvio';
+import { usePedido } from '../context/PedidoContext';
+import { pedirPermisoNotificaciones, programarAvisos } from '../services/notificaciones';
+import { pasosDe } from '../data/seguimiento';
 
 const MEDIOS_DE_PAGO = [
   { id: 'credito', nombre: 'Tarjeta de crédito' },
@@ -28,6 +31,7 @@ const generarCodigoRapipago = () =>
 export default function PrepararCompra({ route, navigation }) {
   const { items, subtotal, comprarAhora, entrega: entregaInicial } = route.params;
   const { quitarSeleccionados } = useCarrito();
+  const { crearPedido } = usePedido();
 
   // La entrega arranca con lo que se eligió antes (carrito o "Comprar ahora") y se puede cambiar acá
   const entrega = useEntrega(entregaInicial);
@@ -125,21 +129,46 @@ export default function PrepararCompra({ route, navigation }) {
       }
     }
 
-    const detallePago =
-      medioPago === 'rapipago'
-        ? `Tu código de pago es ${generarCodigoRapipago()}. Abonalo en cualquier sucursal de Rapipago.`
-        : 'Tu pago fue aprobado.';
+    const codigoRapipago = medioPago === 'rapipago' ? generarCodigoRapipago() : null;
+    const detallePago = codigoRapipago
+      ? `Tu código de pago es ${codigoRapipago}. Abonalo en cualquier sucursal de Rapipago.`
+      : 'Tu pago fue aprobado.';
 
-    Alert.alert('¡Compra confirmada!', `${detallePago}\n\nTotal: $${total}`, [
-      {
-        text: 'Aceptar',
-        onPress: () => {
-          // Si compró desde el carrito, esos productos salen del carrito
-          if (!comprarAhora) quitarSeleccionados();
-          navigation.popToTop();
+    Alert.alert(
+      '¡Compra confirmada!',
+      `${detallePago}\n\nTotal: $${total}`,
+      [
+        {
+          text: 'Ver mi pedido',
+          onPress: async () => {
+            // Si compró desde el carrito, esos productos salen del carrito
+            if (!comprarAhora) quitarSeleccionados();
+
+            // Pide permiso para avisarle cómo va su pedido
+            const avisosActivados = await pedirPermisoNotificaciones();
+
+            const pedido = crearPedido({
+              items: items.map((i) => ({ id: i.id, nombre: i.nombre, cantidad: i.cantidad, precio: i.precio })),
+              total,
+              medioPago,
+              codigoRapipago,
+              conEnvio: entrega.conEnvio,
+              direccion: entrega.conEnvio ? entrega.direccion : null,
+              localidad: entrega.conEnvio ? entrega.localidad : null,
+              destino: entrega.conEnvio && entrega.envio ? entrega.envio.destino : null,
+              distanciaKm: entrega.conEnvio && entrega.envio ? entrega.envio.distanciaKm : null,
+              avisosActivados,
+            });
+
+            if (avisosActivados) await programarAvisos(pasosDe(pedido));
+
+            // Vuelve al inicio y abre el seguimiento (el botón "atrás" lleva al inicio)
+            navigation.reset({ index: 1, routes: [{ name: 'Inicio' }, { name: 'Seguimiento' }] });
+          },
         },
-      },
-    ]);
+      ],
+      { cancelable: false }
+    );
   };
 
   const puedeConfirmar = medioPago !== null;

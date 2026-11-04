@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 
 export default function BienvenidaScreen({ navigation }) {
@@ -7,7 +7,7 @@ export default function BienvenidaScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.icono}>🍬</Text>
+      <Image source={require('../assets/images/logo.png')} style={styles.logo} resizeMode="contain" />
 
       {esAdmin && (
         <View style={styles.etiqueta}>
@@ -31,7 +31,7 @@ export default function BienvenidaScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF8E1', justifyContent: 'center', alignItems: 'center', padding: 24 },
-  icono: { fontSize: 72 },
+  logo: { width: 230, height: 168 },
   etiqueta: { backgroundColor: '#c77b00', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 4, marginTop: 8 },
   etiquetaTexto: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
   titulo: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginTop: 14 },

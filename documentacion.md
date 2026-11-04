@@ -1,6 +1,8 @@
 # Dulces Lucho App — Documentación del proyecto y del proceso
 
-> Última actualización: 30 de octubre de 2026
+<p align="center"><img src="assets/images/logo.png" alt="Logo de Dulces Lucho" width="220"></p>
+
+> Última actualización: 3 de noviembre de 2026
 > Repositorio: https://github.com/luchos-git/Dulces-Lucho-App
 > Equipo: Luciano y Agustín
 
@@ -82,7 +84,10 @@ El cliente puede:
 | Menú lateral | Componente propio hecho con la API `Animated` de React Native |
 | Estado del carrito | Context API de React (`CarritoContext`) |
 | Sesión y cuentas | Context API de React (`AuthContext`), solo en memoria |
+| Pedido en curso | Context API de React (`PedidoContext`), solo en memoria |
+| Avisos al celular | `expo-notifications` (notificaciones **locales**, funcionan en Expo Go) |
 | Ubicación y kilómetros | APIs gratuitas de OpenStreetMap: **Nominatim** (dirección → coordenadas) y **OSRM** (distancia por calles) |
+| Ícono y logo | Imágenes PNG dibujadas para el proyecto, en `assets/images/` (ver sección 14) |
 | Probar en el celular | Expo Go |
 | Control de versiones | Git y GitHub |
 | Editor | Visual Studio Code |
@@ -130,15 +135,22 @@ Dulces-Lucho-App/
 ├── app.json                    ← Configuración de Expo
 ├── babel.config.js
 ├── package.json
+├── assets/
+│   └── images/
+│       ├── logo.png                ← Logo con el nombre (se ve en Login y Bienvenida)
+│       ├── icon.png                ← Ícono de la app
+│       └── android-icon-*.png      ← Ícono para Android (fondo, figura y versión de un solo color)
 ├── components/
 │   ├── EntregaEnvio.js         ← Retiro o envío: dirección, localidad y cálculo (se usa en carrito y pago)
 │   └── ModalAgregar.js         ← Ventana para elegir la cantidad al agregar un recomendado
 ├── context/
 │   ├── CarritoContext.js       ← Estado compartido del carrito
-│   └── AuthContext.js          ← Cuentas, inicio de sesión y clave única del administrador
+│   ├── AuthContext.js          ← Cuentas, inicio de sesión y clave única del administrador
+│   └── PedidoContext.js        ← Pedido en curso (para el seguimiento)
 ├── data/
 │   ├── productos.js            ← Lista de productos (con descripción)
 │   ├── cupones.js              ← Lista de cupones
+│   ├── seguimiento.js          ← Etapas y tiempos del seguimiento del pedido (simulación)
 │   └── usuarios.js             ← Cuentas de prueba y código de autorización de administrador
 ├── navigation/
 │   └── DrawerMenu.js           ← Menú lateral propio (desliza desde la derecha)
@@ -151,9 +163,11 @@ Dulces-Lucho-App/
 │   ├── DetalleProducto.js      ← Detalle del producto, agregar al carrito o comprar ahora
 │   ├── carrito.js              ← Carrito, entrega, cálculo de envío y recomendados
 │   ├── prepararCompra.js       ← Entrega, cupón y medio de pago
+│   ├── SeguimientoPedido.js    ← Estado del pedido: confirmado, en camino, cerca, entregado
 │   └── PanelAdminScreen.js     ← Panel del administrador (en construcción)
 ├── services/
-│   └── envio.js                ← Cálculo de distancia y costo de envío
+│   ├── envio.js                ← Cálculo de distancia y costo de envío
+│   └── notificaciones.js       ← Permiso y avisos (notificaciones locales) del pedido
 └── database/
     ├── dulces_lucho.sql        ← Crea la base de datos (tablas y datos iniciales)
     ├── consultas_ejemplo.sql   ← Consultas listas para probar
@@ -197,10 +211,18 @@ Dulces-Lucho-App/
 - **Cupón de descuento** (ver sección 6).
 - **Medio de pago:** crédito, débito (con validación de número, titular, vencimiento y código) o Rapipago (genera un código de pago de ejemplo).
 - **El botón "Confirmar compra" queda inactivo hasta elegir un medio de pago**, y al tocarlo se vuelve a validar todo (medio de pago, envío calculado si corresponde y datos de la tarjeta).
-- Al confirmar se vuelve al inicio. Si la compra vino del carrito, los productos comprados salen del carrito; si fue "Comprar ahora", el carrito queda como estaba.
+- Al confirmar se muestra el aviso de compra confirmada y, al tocar "Ver mi pedido", se pide permiso para mandar notificaciones y se abre el **seguimiento del pedido**. Si la compra vino del carrito, los productos comprados salen del carrito; si fue "Comprar ahora", el carrito queda como estaba.
+
+### Seguimiento del pedido (`SeguimientoPedido.js`)
+- Muestra el estado actual en una tarjeta grande (con el número de pedido) y una línea de tiempo con las etapas.
+- **Con envío:** Pedido confirmado → Preparando tu pedido → **Tu pedido está en camino** → **Tu pedido está cerca** → Entregado. **Con retiro en el local:** Pedido confirmado → Preparando tu pedido → Listo para retirar.
+- También muestra la dirección y los kilómetros (si es envío), los productos, el total y, si se pagó con Rapipago, el código de pago.
+- **Es una simulación:** las etapas avanzan solas con el tiempo (en una demo corta: cada 10 a 20 segundos, ver `data/seguimiento.js`). Los tiempos se calculan desde el momento de la compra, así que si se sale de la pantalla y se vuelve a entrar desde el menú ("Mi pedido") el estado sigue donde corresponde.
+- **Avisos:** al comprar se piden permisos de notificación y se programan avisos en el celular para "en camino", "cerca" y "entregado" (o "listo para retirar"). Si se toca el aviso, se abre el seguimiento. Si no se dan los permisos, el estado se ve igual en la pantalla.
+- "Finalizar" (cuando ya está entregado) cierra el pedido y vuelve al inicio.
 
 ### Menú lateral (`DrawerMenu.js`)
-- Se abre con el botón ☰ del encabezado y desliza desde la derecha. Muestra el nombre de quien inició sesión y tiene "Inicio", "Carrito", "Panel de administración" (solo para administradores) y "Cerrar sesión". Tocar afuera lo cierra.
+- Se abre con el botón ☰ del encabezado y desliza desde la derecha. Muestra el nombre de quien inició sesión y tiene "Inicio", "Carrito", "Mi pedido" (solo si hay un pedido en curso), "Panel de administración" (solo para administradores) y "Cerrar sesión". Tocar afuera lo cierra.
 
 ### Panel de administración (`PanelAdminScreen.js`)
 - Solo accesible para administradores. Por ahora es una pantalla en construcción: las funciones previstas (agregar productos con ID automático, pedidos, cupones) necesitan guardar datos, y el backend está pausado.
@@ -295,6 +317,7 @@ Este proyecto tuvo cerca de un mes de errores de instalación y configuración a
 - **Pagos simulados:** no se procesa ni se guarda ningún dato de tarjeta.
 - **Cuentas en memoria:** el inicio de sesión se simula con un `AuthContext` y no guarda nada, igual que el carrito. La autenticación real queda para cuando se retome el backend. El ingreso de un administrador tiene dos pasos (contraseña y clave única) y crear un administrador exige un código de autorización.
 - **Una sola pantalla de pago:** tanto "Comprar ahora" como "Preparar compra" del carrito abren `PrepararCompra`. La parte de entrega (retiro o envío) es un componente compartido (`components/EntregaEnvio.js`), así se puede elegir en cualquiera de las dos pantallas.
+- **Avisos locales y no push:** las notificaciones las programa el propio celular con `expo-notifications` (sin servidor), así funcionan en Expo Go. Las notificaciones **push** reales —las que manda un servidor cuando el repartidor se acerca— no están disponibles en Expo Go para Android: necesitan un servidor y un *development build*. Por eso el seguimiento y los avisos son una simulación con tiempos fijos.
 - **Recomendados al azar:** se mezcla la lista de productos (algoritmo de Fisher-Yates) y se toman los dos primeros que no estén en el carrito. Se vuelve a mezclar cada vez que se entra al carrito.
 
 ---
@@ -371,6 +394,8 @@ En Android se puede instalar la versión de Expo Go que coincida con el SDK desd
 - Agregar cuotas para la tarjeta de crédito.
 - Retomar el backend cuando el profesor lo indique: guardar productos y cuentas (con contraseñas cifradas y validación de la clave única en el servidor), panel de administración con ID autoincremental y pagos reales con un servicio como Mercado Pago.
 - Completar el panel de administración (hoy es una pantalla en construcción).
+- Seguimiento real del pedido: que el estado y el aviso de "tu pedido está cerca" los dispare el servidor según la ubicación del repartidor (notificaciones push + development build), en lugar de los tiempos fijos de `data/seguimiento.js`.
+- Guardar los pedidos en la base de datos (`ventas` y `detalle_ventas`) y mostrar el historial de pedidos.
 - Armar la API (por ejemplo con Express y `mysql2`) que conecte la app con la base de datos `dulces_lucho` (sección 13): iniciar sesión, listar productos y registrar ventas.
 - Cambiar el código de autorización de administrador y las cuentas de prueba antes de entregar o publicar el proyecto.
 - Actualizar al SDK 58 cuando Expo Go lo pida.
@@ -500,3 +525,38 @@ Los precios en la base son `DECIMAL`, y las librerías los devuelven como texto:
 
 ### Qué falta para conectarla con la app
 La app todavía **no se conecta** a la base: el catálogo, las cuentas y las ventas siguen viviendo en la memoria del celular. Falta armar un servidor (API) que lea y escriba en esta base, con rutas para iniciar sesión, listar productos, validar cupones y registrar ventas. Las contraseñas se tienen que cifrar con bcrypt en ese servidor, nunca en la app.
+
+---
+
+## 14. Logo e ícono de la app
+
+<p align="center"><img src="assets/images/logo.png" alt="Logo de Dulces Lucho" width="260"></p>
+
+El logo es un **caramelo envuelto**: cuerpo de chocolate con franjas color crema y puntas del envoltorio color caramelo, con el nombre "Dulces Lucho" debajo. Usa los mismos colores que la app.
+
+| Color | Código | Dónde se usa |
+|---|---|---|
+| Crema | `#FFF3D6` y `#FFF8E1` | Fondo del ícono y de las pantallas |
+| Chocolate | `#8A4B22` y `#4F280F` | Cuerpo del caramelo y letras |
+| Caramelo | `#E58A1F` y `#C7650F` | Puntas del envoltorio y la palabra "Lucho" |
+
+### Archivos (`assets/images/`)
+
+| Archivo | Tamaño | Para qué sirve |
+|---|---|---|
+| `logo.png` | 1000 × 730 | Logo con el nombre. Se ve **dentro de la app**, en el inicio de sesión y en la bienvenida, y en esta documentación |
+| `icon.png` | 1024 × 1024 | Ícono general de la app (iOS y otros) |
+| `android-icon-foreground.png` | 1024 × 1024 | Caramelo sobre transparente, para el ícono adaptable de Android (entra dentro del círculo central, que es la zona segura) |
+| `android-icon-background.png` | 1024 × 1024 | Fondo liso color crema del ícono de Android |
+| `android-icon-monochrome.png` | 1024 × 1024 | Versión de un solo color: Android 13 o más nuevo la pinta con el color del tema del celular |
+| `favicon.png` | 96 × 96 | Ícono de la pestaña si se abre la versión web |
+| `splash-icon.png` | 1024 × 1024 | Caramelo para la pantalla de carga (todavía no está conectado en `app.json`) |
+
+Las rutas del ícono están en `app.json` (`icon`, `android.adaptiveIcon` y `web.favicon`).
+
+### Dónde se ve cada uno
+- **Dentro de la app (Expo Go):** se ve el **logo** en las pantallas de inicio de sesión y de bienvenida.
+- **Ícono en la pantalla del celular:** con **Expo Go no se ve**, porque Expo Go muestra su propio ícono. El ícono de Dulces Lucho aparece cuando la app se instala como aplicación propia, es decir, con un *build* (por ejemplo, con EAS Build).
+
+### Cómo cambiarlos
+Reemplazar los PNG por otros **con el mismo nombre y tamaño**. Para Android, la figura tiene que quedar dentro del círculo central (más o menos los dos tercios del centro de la imagen); lo que queda afuera se recorta según la forma de ícono que use el celular.

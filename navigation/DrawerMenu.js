@@ -4,7 +4,7 @@ import { Animated, TouchableOpacity, TouchableWithoutFeedback, View, Text, Style
 const { width } = Dimensions.get('window');
 const DRAWER_WIDTH = width * 0.72;
 
-export default function DrawerMenu({ visible, onClose, onNavigate, usuario, esAdmin, onLogout }) {
+export default function DrawerMenu({ visible, onClose, onNavigate, usuario, esAdmin, hayPedido, onLogout }) {
   const translateX = useRef(new Animated.Value(DRAWER_WIDTH)).current;
 
   useEffect(() => {
@@ -38,6 +38,11 @@ export default function DrawerMenu({ visible, onClose, onNavigate, usuario, esAd
         <TouchableOpacity style={styles.item} onPress={() => onNavigate('Carrito')}>
           <Text style={styles.itemText}>Carrito</Text>
         </TouchableOpacity>
+        {hayPedido && (
+          <TouchableOpacity style={styles.item} onPress={() => onNavigate('Seguimiento')}>
+            <Text style={styles.itemText}>Mi pedido</Text>
+          </TouchableOpacity>
+        )}
         {esAdmin && (
           <TouchableOpacity style={styles.item} onPress={() => onNavigate('PanelAdmin')}>
             <Text style={styles.itemText}>Panel de administración</Text>

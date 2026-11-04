@@ -5,6 +5,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CarritoProvider, useCarrito } from './context/CarritoContext';
+import { PedidoProvider, usePedido } from './context/PedidoContext';
+import { cancelarAvisos, alTocarAviso } from './services/notificaciones';
 
 import LoginScreen from './screens/LoginScreen';
 import RegistroScreen from './screens/RegistroScreen';
@@ -14,6 +16,7 @@ import HomeScreen from './screens/HomeScreen';
 import CarritoScreen from './screens/carrito';
 import DetalleProducto from './screens/DetalleProducto';
 import PrepararCompra from './screens/prepararCompra';
+import SeguimientoPedido from './screens/SeguimientoPedido';
 import PanelAdminScreen from './screens/PanelAdminScreen';
 import DrawerMenu from './navigation/DrawerMenu';
 
@@ -22,6 +25,7 @@ const Stack = createNativeStackNavigator();
 function Navegacion() {
   const { usuario, esAdmin, cerrarSesion } = useAuth();
   const { vaciarCarrito } = useCarrito();
+  const { pedidoActual, limpiarPedido } = usePedido();
   const [menuVisible, setMenuVisible] = React.useState(false);
   const navigationRef = React.useRef(null);
 
@@ -34,11 +38,24 @@ function Navegacion() {
         style: 'destructive',
         onPress: () => {
           vaciarCarrito();
+          limpiarPedido();
+          cancelarAvisos();
           cerrarSesion();
         },
       },
     ]);
   };
+
+  // Si la persona toca una notificación del pedido, se abre el seguimiento
+  React.useEffect(() => {
+    if (usuario == null) return undefined;
+    const suscripcion = alTocarAviso(() => {
+      if (navigationRef.current && navigationRef.current.isReady()) {
+        navigationRef.current.navigate('Seguimiento');
+      }
+    });
+    return () => suscripcion.remove();
+  }, [usuario]);
 
   return (
     <NavigationContainer ref={navigationRef}>
@@ -70,6 +87,7 @@ function Navegacion() {
               options={({ route }) => ({ title: route.params.producto.nombre })}
             />
             <Stack.Screen name="PrepararCompra" component={PrepararCompra} options={{ title: 'Preparar compra' }} />
+            <Stack.Screen name="Seguimiento" component={SeguimientoPedido} options={{ title: 'Seguimiento del pedido' }} />
             <Stack.Screen name="PanelAdmin" component={PanelAdminScreen} options={{ title: 'Panel de administración' }} />
           </Stack.Group>
         )}
@@ -85,6 +103,7 @@ function Navegacion() {
           }}
           usuario={usuario}
           esAdmin={esAdmin}
+          hayPedido={pedidoActual != null}
           onLogout={salir}
         />
       )}
@@ -96,7 +115,9 @@ export default function App() {
   return (
     <AuthProvider>
       <CarritoProvider>
-        <Navegacion />
+        <PedidoProvider>
+          <Navegacion />
+        </PedidoProvider>
       </CarritoProvider>
     </AuthProvider>
   );

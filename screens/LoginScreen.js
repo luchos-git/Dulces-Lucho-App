@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Image } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 
 export default function LoginScreen({ navigation }) {
@@ -35,8 +35,7 @@ export default function LoginScreen({ navigation }) {
       contentContainerStyle={styles.contenido}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.logo}>🍬</Text>
-      <Text style={styles.marca}>Dulces Lucho</Text>
+      <Image source={require('../assets/images/logo.png')} style={styles.logo} resizeMode="contain" />
       <Text style={styles.titulo}>Iniciar sesión</Text>
 
       <TextInput
@@ -79,8 +78,7 @@ export default function LoginScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF8E1' },
   contenido: { flexGrow: 1, justifyContent: 'center', padding: 24 },
-  logo: { fontSize: 56, textAlign: 'center' },
-  marca: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', color: '#c77b00', marginBottom: 20 },
+  logo: { width: 230, height: 168, alignSelf: 'center', marginBottom: 16 },
   titulo: { fontSize: 18, fontWeight: 'bold', marginBottom: 12 },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, marginBottom: 10 },
   error: { color: '#e57373', fontWeight: 'bold', marginBottom: 8 },
