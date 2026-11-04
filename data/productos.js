@@ -1,12 +1,46 @@
+// ---------------------------------------------------------------------------
+// CATÁLOGO DE DULCES LUCHO
+// Productos reales del emprendimiento: bolsitas selladas con obleas Smacks de
+// chocolate y un alfajor adentro (dos versiones) y jugos Baggio, solos o junto
+// a las bolsitas.
+//
+// ⚠️ LOS PRECIOS SON DE EJEMPLO. Cambiá cada "precio" por el real.
+// Si hay más productos, agregá una línea más con el siguiente id.
+// ---------------------------------------------------------------------------
 export const productos = [
-  { id: 1, nombre: 'Alfajor de maicena', categoria: 'Alfajores', precio: 1500 },
-  { id: 2, nombre: 'Alfajor de chocolate', categoria: 'Alfajores', precio: 1600 },
-  { id: 3, nombre: 'Alfajor triple', categoria: 'Alfajores', precio: 2000 },
-  { id: 4, nombre: 'Chocolate con almendras', categoria: 'Chocolates', precio: 2500 },
-  { id: 5, nombre: 'Chocolate blanco', categoria: 'Chocolates', precio: 2300 },
-  { id: 6, nombre: 'Chocolate amargo 70%', categoria: 'Chocolates', precio: 2400 },
-  { id: 7, nombre: 'Caramelos de miel', categoria: 'Caramelos', precio: 900 },
-  { id: 8, nombre: 'Caramelos surtidos', categoria: 'Caramelos', precio: 950 },
-  { id: 9, nombre: 'Bombones surtidos', categoria: 'Bombones', precio: 3000 },
-  { id: 10, nombre: 'Bombones de licor', categoria: 'Bombones', precio: 3500 },
+  {
+    id: 1,
+    nombre: 'Bolsita Smacks 3 obleas + alfajor',
+    categoria: 'Bolsitas',
+    precio: 1500,
+    descripcion: 'Bolsita sellada con 3 obleas Smacks de chocolate y un alfajor adentro.',
+  },
+  {
+    id: 2,
+    nombre: 'Bolsita Smacks 4 obleas + alfajor',
+    categoria: 'Bolsitas',
+    precio: 1800,
+    descripcion: 'Bolsita sellada con 4 obleas Smacks de chocolate y un alfajor adentro.',
+  },
+  {
+    id: 3,
+    nombre: 'Jugo Baggio',
+    categoria: 'Jugos',
+    precio: 700,
+    descripcion: 'Jugo Baggio individual.',
+  },
+  {
+    id: 4,
+    nombre: 'Combo 3 obleas + alfajor con jugo Baggio',
+    categoria: 'Combos',
+    precio: 2100,
+    descripcion: 'La bolsita de 3 obleas Smacks y alfajor, junto con un jugo Baggio.',
+  },
+  {
+    id: 5,
+    nombre: 'Combo 4 obleas + alfajor con jugo Baggio',
+    categoria: 'Combos',
+    precio: 2400,
+    descripcion: 'La bolsita de 4 obleas Smacks y alfajor, junto con un jugo Baggio.',
+  },
 ];

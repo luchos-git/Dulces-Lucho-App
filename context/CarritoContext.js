@@ -3,7 +3,7 @@ import React, { createContext, useContext, useState } from 'react';
 const CarritoContext = createContext();
 
 export function CarritoProvider({ children }) {
-  const [items, setItems] = useState([]); // { id, nombre, precio, cantidad, seleccionado }
+  const [items, setItems] = useState([]); // { id, nombre, precio, cantidad, seleccionado, ... }
 
   const agregarAlCarrito = (producto, cantidad = 1) => {
     setItems((prev) => {
@@ -28,11 +28,24 @@ export function CarritoProvider({ children }) {
     setItems((prev) => prev.map((i) => ({ ...i, seleccionado: !todosSeleccionados })));
   };
 
+  // Saca del carrito los productos que se acaban de comprar
   const quitarSeleccionados = () => setItems((prev) => prev.filter((i) => !i.seleccionado));
+
+  // Vacía todo el carrito (se usa al cerrar sesión)
+  const vaciarCarrito = () => setItems([]);
 
   return (
     <CarritoContext.Provider
-      value={{ items, agregarAlCarrito, quitarDelCarrito, cambiarCantidad, toggleSeleccionado, toggleSeleccionarTodo, quitarSeleccionados }}
+      value={{
+        items,
+        agregarAlCarrito,
+        quitarDelCarrito,
+        cambiarCantidad,
+        toggleSeleccionado,
+        toggleSeleccionarTodo,
+        quitarSeleccionados,
+        vaciarCarrito,
+      }}
     >
       {children}
     </CarritoContext.Provider>

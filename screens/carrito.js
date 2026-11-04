@@ -1,49 +1,60 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { useCarrito } from '../context/CarritoContext';
 import { productos } from '../data/productos';
-import { calcularEnvio, UMBRAL_GRATIS_KM } from '../services/envio';
+import EntregaEnvio, { useEntrega } from '../components/EntregaEnvio';
+import ModalAgregar from '../components/ModalAgregar';
+
+// Devuelve una copia de la lista en orden aleatorio
+const mezclar = (lista) => {
+  const copia = [...lista];
+  for (let i = copia.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copia[i], copia[j]] = [copia[j], copia[i]];
+  }
+  return copia;
+};
 
 export default function CarritoScreen({ navigation }) {
-  const { items, quitarDelCarrito, cambiarCantidad, toggleSeleccionado, toggleSeleccionarTodo } = useCarrito();
+  const {
+    items,
+    agregarAlCarrito,
+    quitarDelCarrito,
+    cambiarCantidad,
+    toggleSeleccionado,
+    toggleSeleccionarTodo,
+  } = useCarrito();
 
-  const [conEnvio, setConEnvio] = useState(false);
-  const [direccion, setDireccion] = useState('');
-  const [envio, setEnvio] = useState(null); // { distanciaKm, costo }
-  const [calculando, setCalculando] = useState(false);
-  const [errorEnvio, setErrorEnvio] = useState('');
+  const entrega = useEntrega();
+
+  // Orden aleatorio de todos los productos; se vuelve a sortear cada vez que se entra al carrito
+  const [orden, setOrden] = useState(() => mezclar(productos));
+  const [productoModal, setProductoModal] = useState(null);
+
+  useEffect(() => {
+    const dejarDeEscuchar = navigation.addListener('focus', () => setOrden(mezclar(productos)));
+    return dejarDeEscuchar;
+  }, [navigation]);
 
   const todosSeleccionados = items.length > 0 && items.every((i) => i.seleccionado);
   const subtotal = items
     .filter((i) => i.seleccionado)
     .reduce((acc, i) => acc + i.precio * i.cantidad, 0);
-  const costoEnvio = conEnvio && envio ? envio.costo : 0;
+  const costoEnvio = entrega.conEnvio && entrega.envio ? entrega.envio.costo : 0;
   const total = subtotal + costoEnvio;
 
+  // Recomendados: 2 productos al azar que todavía no estén en el carrito
   const idsEnCarrito = items.map((i) => i.id);
-  const recomendados = productos.filter((p) => !idsEnCarrito.includes(p.id)).slice(0, 2);
+  const recomendados = orden.filter((p) => !idsEnCarrito.includes(p.id)).slice(0, 2);
 
   const irADetalle = (item) => {
     const { cantidad, seleccionado, ...producto } = item;
     navigation.navigate('DetalleProducto', { producto });
   };
 
-  const calcular = async () => {
-    if (!direccion.trim()) {
-      setErrorEnvio('Escribí tu dirección (calle y número).');
-      return;
-    }
-    setCalculando(true);
-    setErrorEnvio('');
-    setEnvio(null);
-    try {
-      const resultado = await calcularEnvio(direccion.trim());
-      setEnvio(resultado);
-    } catch (e) {
-      setErrorEnvio(e.message || 'No pudimos calcular el envío. Probá de nuevo.');
-    } finally {
-      setCalculando(false);
-    }
+  const confirmarAgregado = (cantidad) => {
+    agregarAlCarrito(productoModal, cantidad);
+    setProductoModal(null);
   };
 
   const prepararCompra = () => {
@@ -52,21 +63,25 @@ export default function CarritoScreen({ navigation }) {
       Alert.alert('Carrito vacío', 'Seleccioná al menos un producto para continuar.');
       return;
     }
-    if (conEnvio && !envio) {
+    if (entrega.conEnvio && !entrega.envio) {
       Alert.alert('Falta el envío', 'Calculá el costo de envío antes de continuar.');
       return;
     }
     navigation.navigate('PrepararCompra', {
       items: seleccionados,
       subtotal,
-      conEnvio,
-      direccion,
-      envio,
+      comprarAhora: false,
+      entrega: {
+        conEnvio: entrega.conEnvio,
+        direccion: entrega.direccion,
+        localidad: entrega.localidad,
+        envio: entrega.envio,
+      },
     });
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
       {items.length > 0 && (
         <TouchableOpacity style={styles.filaSeleccionarTodo} onPress={toggleSeleccionarTodo}>
           <View style={[styles.checkbox, todosSeleccionados && styles.checkboxActivo]}>
@@ -119,54 +134,7 @@ export default function CarritoScreen({ navigation }) {
 
       {items.length > 0 && (
         <View style={styles.cajaEnvio}>
-          <Text style={styles.tituloEnvio}>Entrega</Text>
-
-          <View style={styles.filaOpciones}>
-            <TouchableOpacity
-              style={[styles.opcion, !conEnvio && styles.opcionActiva]}
-              onPress={() => setConEnvio(false)}
-            >
-              <Text style={[styles.opcionTexto, !conEnvio && styles.opcionTextoActivo]}>Retiro en el local</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.opcion, conEnvio && styles.opcionActiva]}
-              onPress={() => setConEnvio(true)}
-            >
-              <Text style={[styles.opcionTexto, conEnvio && styles.opcionTextoActivo]}>Envío a domicilio</Text>
-            </TouchableOpacity>
-          </View>
-
-          {conEnvio && (
-            <View>
-              <TextInput
-                style={styles.inputDireccion}
-                placeholder="Calle y número (ej: Av. Mitre 1234)"
-                value={direccion}
-                onChangeText={(texto) => {
-                  setDireccion(texto);
-                  setEnvio(null);
-                }}
-              />
-
-              <TouchableOpacity style={styles.botonCalcular} onPress={calcular} disabled={calculando}>
-                {calculando ? (
-                  <ActivityIndicator color="#000" />
-                ) : (
-                  <Text style={styles.botonCalcularTexto}>Calcular envío</Text>
-                )}
-              </TouchableOpacity>
-
-              {errorEnvio !== '' && <Text style={styles.errorEnvio}>{errorEnvio}</Text>}
-
-              {envio && (
-                <Text style={styles.resultadoEnvio}>
-                  {envio.distanciaKm.toFixed(1)} km — {envio.costo === 0 ? '¡Envío gratis!' : `Envío: $${envio.costo}`}
-                </Text>
-              )}
-
-              <Text style={styles.notaEnvio}>Envío gratis hasta {UMBRAL_GRATIS_KM} km. Datos © OpenStreetMap.</Text>
-            </View>
-          )}
+          <EntregaEnvio entrega={entrega} />
         </View>
       )}
 
@@ -174,9 +142,9 @@ export default function CarritoScreen({ navigation }) {
         <View>
           <View style={styles.resumen}>
             <Text>Subtotal: ${subtotal}</Text>
-            {conEnvio && (
+            {entrega.conEnvio && (
               <Text>
-                Envío: {envio ? (envio.costo === 0 ? 'gratis' : `$${envio.costo}`) : 'sin calcular'}
+                Envío: {entrega.envio ? (entrega.envio.costo === 0 ? 'gratis' : `$${entrega.envio.costo}`) : 'sin calcular'}
               </Text>
             )}
           </View>
@@ -201,10 +169,7 @@ export default function CarritoScreen({ navigation }) {
                 <View style={styles.fotoPlaceholderChica}><Text>Foto</Text></View>
                 <Text numberOfLines={1}>{prod.nombre}</Text>
                 <Text style={styles.precioItem}>${prod.precio}</Text>
-                <TouchableOpacity
-                  style={styles.botonAgregarChico}
-                  onPress={() => Alert.alert('En proceso', 'Andá al detalle del producto para agregarlo.')}
-                >
+                <TouchableOpacity style={styles.botonAgregarChico} onPress={() => setProductoModal(prod)}>
                   <Text>Agregar</Text>
                 </TouchableOpacity>
               </View>
@@ -212,6 +177,12 @@ export default function CarritoScreen({ navigation }) {
           </View>
         </>
       )}
+
+      <ModalAgregar
+        producto={productoModal}
+        onCancelar={() => setProductoModal(null)}
+        onConfirmar={confirmarAgregado}
+      />
     </ScrollView>
   );
 }
@@ -243,18 +214,6 @@ const styles = StyleSheet.create({
   cantidadTexto: { marginHorizontal: 6 },
 
   cajaEnvio: { backgroundColor: '#fff', marginHorizontal: 10, marginBottom: 10, padding: 12, borderRadius: 10 },
-  tituloEnvio: { fontWeight: 'bold', marginBottom: 8 },
-  filaOpciones: { flexDirection: 'row' },
-  opcion: { flex: 1, borderWidth: 1, borderColor: '#ffcc80', paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginRight: 8 },
-  opcionActiva: { backgroundColor: '#ffcc80' },
-  opcionTexto: { color: '#c77b00' },
-  opcionTextoActivo: { color: '#000', fontWeight: 'bold' },
-  inputDireccion: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, marginTop: 12 },
-  botonCalcular: { backgroundColor: '#ffcc80', paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginTop: 8 },
-  botonCalcularTexto: { fontWeight: 'bold' },
-  errorEnvio: { color: '#e57373', fontWeight: 'bold', marginTop: 8 },
-  resultadoEnvio: { color: '#2e7d32', fontWeight: 'bold', marginTop: 8 },
-  notaEnvio: { color: '#888', fontSize: 12, marginTop: 6 },
 
   resumen: { marginHorizontal: 12, marginTop: 4 },
   filaTotal: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 10, marginVertical: 14 },

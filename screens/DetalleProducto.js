@@ -2,22 +2,27 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { useCarrito } from '../context/CarritoContext';
 
-export default function DetalleProducto({ route }) {
+export default function DetalleProducto({ route, navigation }) {
   const { producto } = route.params;
+  const { agregarAlCarrito } = useCarrito();
   const [cantidad, setCantidad] = useState(1);
 
   const sumar = () => setCantidad((c) => c + 1);
   const restar = () => setCantidad((c) => (c > 1 ? c - 1 : 1));
 
-const { agregarAlCarrito: agregarAlCarritoContext } = useCarrito();
+  const agregar = () => {
+    agregarAlCarrito(producto, cantidad);
+    Alert.alert('Agregado', `${cantidad} x ${producto.nombre} agregado al carrito.`);
+  };
 
-const agregarAlCarrito = () => {
-  agregarAlCarritoContext(producto, cantidad);
-  Alert.alert('Agregado', `${cantidad} x ${producto.nombre} agregado al carrito.`);
-};
-
+  // "Comprar ahora" va directo a la pantalla de pago con este producto solo
   const comprarAhora = () => {
-    Alert.alert('En proceso', 'Esta sección estará lista pronto.');
+    navigation.navigate('PrepararCompra', {
+      items: [{ ...producto, cantidad, seleccionado: true }],
+      subtotal: producto.precio * cantidad,
+      comprarAhora: true,
+      entrega: { conEnvio: false },
+    });
   };
 
   return (
@@ -28,6 +33,8 @@ const agregarAlCarrito = () => {
         <Text style={styles.nombre}>{producto.nombre}</Text>
         <Text style={styles.categoria}>{producto.categoria}</Text>
         <Text style={styles.precio}>${producto.precio}</Text>
+
+        {producto.descripcion ? <Text style={styles.descripcion}>{producto.descripcion}</Text> : null}
 
         <View style={styles.selectorCantidad}>
           <Text style={styles.label}>Cantidad</Text>
@@ -46,7 +53,7 @@ const agregarAlCarrito = () => {
           <Text style={styles.textoBotonComprar}>Comprar ahora</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.botonAgregar} onPress={agregarAlCarrito}>
+        <TouchableOpacity style={styles.botonAgregar} onPress={agregar}>
           <Text style={styles.textoBotonAgregar}>Agregar al carrito</Text>
         </TouchableOpacity>
       </View>
@@ -60,7 +67,8 @@ const styles = StyleSheet.create({
   info: { padding: 20 },
   nombre: { fontSize: 22, fontWeight: 'bold' },
   categoria: { color: '#888', marginTop: 2, marginBottom: 8 },
-  precio: { fontSize: 20, fontWeight: 'bold', color: '#c77b00', marginBottom: 16 },
+  precio: { fontSize: 20, fontWeight: 'bold', color: '#c77b00', marginBottom: 12 },
+  descripcion: { color: '#555', marginBottom: 16 },
   selectorCantidad: { marginBottom: 20 },
   label: { fontSize: 14, marginBottom: 6, color: '#555' },
   contador: { flexDirection: 'row', alignItems: 'center' },

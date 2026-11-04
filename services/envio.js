@@ -1,8 +1,13 @@
-// Coordenadas del local: en OpenStreetMap o Google Maps, clic derecho sobre el local y copiás los dos números
-const LOCAL = { latitude: -34.6037, longitude: -58.3816 };
+// ---------------------------------------------------------------------------
+// ¡IMPORTANTE! Estos dos datos son de EJEMPLO. Cambialos por los del local real.
+// Para sacar las coordenadas: en Google Maps u OpenStreetMap, clic derecho
+// sobre el local y copiás los dos números (latitud y longitud).
+// ---------------------------------------------------------------------------
+export const LOCAL = { latitude: -34.6037, longitude: -58.3816 };
+export const LOCAL_NOMBRE = 'Local Dulces Lucho (dirección de ejemplo)';
 
-// Se agrega a lo que escribe el cliente para que no confunda la localidad
-const SUFIJO_DIRECCION = ', Buenos Aires, Argentina';
+// Se agrega al final de lo que escribe el cliente para acotar la búsqueda
+const SUFIJO_DIRECCION = 'Buenos Aires, Argentina';
 
 export const UMBRAL_GRATIS_KM = 1.5;
 const COSTO_POR_KM_EXTRA = 300;
@@ -13,11 +18,12 @@ export function calcularCostoEnvio(distanciaKm) {
   return kmExtra * COSTO_POR_KM_EXTRA;
 }
 
-// API 1 — Nominatim: convierte una dirección en coordenadas
-async function buscarCoordenadas(direccion) {
+// API 1 — Nominatim: convierte la dirección escrita en coordenadas
+async function buscarCoordenadas(direccion, localidad) {
+  const consulta = [direccion, localidad, SUFIJO_DIRECCION].filter(Boolean).join(', ');
   const url =
     'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ar&q=' +
-    encodeURIComponent(direccion + SUFIJO_DIRECCION);
+    encodeURIComponent(consulta);
 
   const respuesta = await fetch(url, {
     headers: {
@@ -33,12 +39,14 @@ async function buscarCoordenadas(direccion) {
 
   const resultados = await respuesta.json();
   if (!resultados || resultados.length === 0) {
-    throw new Error('No pudimos encontrar esa dirección. Revisá calle y número.');
+    throw new Error('No pudimos encontrar esa dirección. Revisá calle, número y localidad.');
   }
 
   return {
     latitude: parseFloat(resultados[0].lat),
     longitude: parseFloat(resultados[0].lon),
+    // Dirección completa que encontró Nominatim, para mostrársela al cliente
+    direccionEncontrada: resultados[0].display_name,
   };
 }
 
@@ -73,14 +81,16 @@ function distanciaEnLineaRecta(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-export async function calcularEnvio(direccion) {
-  const destino = await buscarCoordenadas(direccion);
+export async function calcularEnvio(direccion, localidad = '') {
+  const destino = await buscarCoordenadas(direccion, localidad);
 
   let distanciaKm;
+  let metodo = 'calles';
   try {
     distanciaKm = await distanciaPorCalles(LOCAL, destino);
   } catch (e) {
     // Si OSRM no responde, usamos la línea recta para que la app no se rompa
+    metodo = 'recta';
     distanciaKm = distanciaEnLineaRecta(
       LOCAL.latitude,
       LOCAL.longitude,
@@ -89,5 +99,11 @@ export async function calcularEnvio(direccion) {
     );
   }
 
-  return { distanciaKm, costo: calcularCostoEnvio(distanciaKm) };
+  return {
+    distanciaKm,
+    costo: calcularCostoEnvio(distanciaKm),
+    origen: LOCAL_NOMBRE,
+    destino: destino.direccionEncontrada,
+    metodo, // 'calles' o 'recta'
+  };
 }

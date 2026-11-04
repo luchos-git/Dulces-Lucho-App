@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { cupones } from '../data/cupones';
 import { useCarrito } from '../context/CarritoContext';
+import EntregaEnvio, { useEntrega } from '../components/EntregaEnvio';
 
 const MEDIOS_DE_PAGO = [
   { id: 'credito', nombre: 'Tarjeta de crédito' },
@@ -25,8 +26,11 @@ const generarCodigoRapipago = () =>
     .trim();
 
 export default function PrepararCompra({ route, navigation }) {
-  const { items, subtotal, conEnvio, direccion, envio } = route.params;
+  const { items, subtotal, comprarAhora, entrega: entregaInicial } = route.params;
   const { quitarSeleccionados } = useCarrito();
+
+  // La entrega arranca con lo que se eligió antes (carrito o "Comprar ahora") y se puede cambiar acá
+  const entrega = useEntrega(entregaInicial);
 
   const [codigoCupon, setCodigoCupon] = useState('');
   const [cuponAplicado, setCuponAplicado] = useState(null);
@@ -40,7 +44,7 @@ export default function PrepararCompra({ route, navigation }) {
 
   // ---- Cálculo del total ----
   let descuento = 0;
-  let envioFinal = conEnvio && envio ? envio.costo : 0;
+  let envioFinal = entrega.conEnvio && entrega.envio ? entrega.envio.costo : 0;
 
   if (cuponAplicado) {
     if (cuponAplicado.tipo === 'porcentaje') {
@@ -67,7 +71,7 @@ export default function PrepararCompra({ route, navigation }) {
       setErrorCupon('Ese cupón no existe o venció.');
       return;
     }
-    if (encontrado.tipo === 'envioGratis' && !conEnvio) {
+    if (encontrado.tipo === 'envioGratis' && !entrega.conEnvio) {
       setErrorCupon('Este cupón solo sirve con envío a domicilio.');
       return;
     }
@@ -100,14 +104,23 @@ export default function PrepararCompra({ route, navigation }) {
 
   // ---- Confirmar ----
   const confirmarCompra = () => {
+    // 1) Tiene que haber un medio de pago elegido
     if (!medioPago) {
-      Alert.alert('Falta el medio de pago', 'Elegí cómo querés pagar.');
+      Alert.alert('Falta el medio de pago', 'Elegí cómo querés pagar para poder continuar.');
       return;
     }
+
+    // 2) Si es envío, el costo tiene que estar calculado
+    if (entrega.conEnvio && !entrega.envio) {
+      Alert.alert('Falta el envío', 'Calculá el costo de envío antes de confirmar.');
+      return;
+    }
+
+    // 3) Con tarjeta, los datos tienen que estar completos y bien
     if (medioPago !== 'rapipago') {
       const error = validarTarjeta();
       if (error) {
-        Alert.alert('Revisá los datos', error);
+        Alert.alert('Revisá los datos de la tarjeta', error);
         return;
       }
     }
@@ -121,12 +134,15 @@ export default function PrepararCompra({ route, navigation }) {
       {
         text: 'Aceptar',
         onPress: () => {
-          quitarSeleccionados();
+          // Si compró desde el carrito, esos productos salen del carrito
+          if (!comprarAhora) quitarSeleccionados();
           navigation.popToTop();
         },
       },
     ]);
   };
+
+  const puedeConfirmar = medioPago !== null;
 
   return (
     <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
@@ -143,26 +159,9 @@ export default function PrepararCompra({ route, navigation }) {
         ))}
       </View>
 
-      {/* Entrega */}
+      {/* Entrega (retiro o envío, con origen y destino) */}
       <View style={styles.caja}>
-        <View style={styles.filaTitulo}>
-          <Text style={styles.titulo}>Entrega</Text>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={styles.link}>Cambiar</Text>
-          </TouchableOpacity>
-        </View>
-        {conEnvio ? (
-          <View>
-            <Text>📍 {direccion}</Text>
-            {envio && (
-              <Text style={styles.detalle}>
-                {envio.distanciaKm.toFixed(1)} km — {envioFinal === 0 ? 'envío gratis' : `envío $${envioFinal}`}
-              </Text>
-            )}
-          </View>
-        ) : (
-          <Text>Retiro en el local</Text>
-        )}
+        <EntregaEnvio entrega={entrega} />
       </View>
 
       {/* Cupón */}
@@ -210,6 +209,8 @@ export default function PrepararCompra({ route, navigation }) {
             <Text style={styles.opcionPagoTexto}>{medio.nombre}</Text>
           </TouchableOpacity>
         ))}
+
+        {!medioPago && <Text style={styles.avisoPago}>Elegí un medio de pago para poder confirmar la compra.</Text>}
 
         {(medioPago === 'credito' || medioPago === 'debito') && (
           <View style={styles.formTarjeta}>
@@ -270,10 +271,12 @@ export default function PrepararCompra({ route, navigation }) {
             <Text style={styles.descuento}>-${descuento}</Text>
           </View>
         )}
-        {conEnvio && (
+        {entrega.conEnvio && (
           <View style={styles.filaMonto}>
             <Text>Envío</Text>
-            <Text>{envioFinal === 0 ? 'Gratis' : `$${envioFinal}`}</Text>
+            <Text>
+              {entrega.envio ? (envioFinal === 0 ? 'Gratis' : `$${envioFinal}`) : 'Sin calcular'}
+            </Text>
           </View>
         )}
         <View style={[styles.filaMonto, styles.filaTotal]}>
@@ -282,8 +285,14 @@ export default function PrepararCompra({ route, navigation }) {
         </View>
       </View>
 
-      <TouchableOpacity style={styles.botonConfirmar} onPress={confirmarCompra}>
-        <Text style={styles.botonConfirmarTexto}>Confirmar compra</Text>
+      <TouchableOpacity
+        style={[styles.botonConfirmar, !puedeConfirmar && styles.botonConfirmarInactivo]}
+        onPress={confirmarCompra}
+        disabled={!puedeConfirmar}
+      >
+        <Text style={styles.botonConfirmarTexto}>
+          {puedeConfirmar ? 'Confirmar compra' : 'Elegí un medio de pago'}
+        </Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -294,9 +303,7 @@ const styles = StyleSheet.create({
 
   caja: { backgroundColor: '#fff', marginHorizontal: 10, marginTop: 10, padding: 12, borderRadius: 10 },
   titulo: { fontWeight: 'bold', fontSize: 16, marginBottom: 8 },
-  filaTitulo: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   link: { color: '#c77b00', fontWeight: 'bold' },
-  detalle: { color: '#888', marginTop: 4 },
 
   filaMonto: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
   nombreItem: { flex: 1, marginRight: 10 },
@@ -317,6 +324,7 @@ const styles = StyleSheet.create({
   opcionPagoTexto: { marginLeft: 10 },
   radio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#c77b00' },
   radioActivo: { backgroundColor: '#c77b00' },
+  avisoPago: { color: '#e57373', fontWeight: 'bold', marginTop: 2 },
 
   formTarjeta: { marginTop: 4 },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, marginBottom: 8 },
@@ -326,5 +334,6 @@ const styles = StyleSheet.create({
   infoRapipago: { color: '#555', marginTop: 4 },
 
   botonConfirmar: { backgroundColor: '#007bff', marginHorizontal: 10, marginVertical: 16, padding: 14, borderRadius: 8, alignItems: 'center' },
+  botonConfirmarInactivo: { backgroundColor: '#b0bec5' },
   botonConfirmarTexto: { color: '#fff', fontWeight: 'bold' },
 });
