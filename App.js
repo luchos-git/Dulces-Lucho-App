@@ -6,6 +6,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CarritoProvider, useCarrito } from './context/CarritoContext';
 import { PedidoProvider, usePedido } from './context/PedidoContext';
+import { ProductosProvider } from './context/ProductosContext';
 import { cancelarAvisos, alTocarAviso } from './services/notificaciones';
 
 import LoginScreen from './screens/LoginScreen';
@@ -17,6 +18,7 @@ import CarritoScreen from './screens/carrito';
 import DetalleProducto from './screens/DetalleProducto';
 import PrepararCompra from './screens/prepararCompra';
 import SeguimientoPedido from './screens/SeguimientoPedido';
+import HistorialPedidosScreen from './screens/HistorialPedidosScreen';
 import PanelAdminScreen from './screens/PanelAdminScreen';
 import DrawerMenu from './navigation/DrawerMenu';
 
@@ -88,6 +90,7 @@ function Navegacion() {
             />
             <Stack.Screen name="PrepararCompra" component={PrepararCompra} options={{ title: 'Preparar compra' }} />
             <Stack.Screen name="Seguimiento" component={SeguimientoPedido} options={{ title: 'Seguimiento del pedido' }} />
+            <Stack.Screen name="MisPedidos" component={HistorialPedidosScreen} options={{ title: 'Mis pedidos' }} />
             <Stack.Screen name="PanelAdmin" component={PanelAdminScreen} options={{ title: 'Panel de administración' }} />
           </Stack.Group>
         )}
@@ -114,11 +117,13 @@ function Navegacion() {
 export default function App() {
   return (
     <AuthProvider>
+      <ProductosProvider>
       <CarritoProvider>
         <PedidoProvider>
           <Navegacion />
         </PedidoProvider>
       </CarritoProvider>
+      </ProductosProvider>
     </AuthProvider>
   );
 }

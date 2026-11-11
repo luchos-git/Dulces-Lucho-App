@@ -38,11 +38,7 @@ export default function DrawerMenu({ visible, onClose, onNavigate, usuario, esAd
         <TouchableOpacity style={styles.item} onPress={() => onNavigate('Carrito')}>
           <Text style={styles.itemText}>Carrito</Text>
         </TouchableOpacity>
-        {hayPedido && (
-          <TouchableOpacity style={styles.item} onPress={() => onNavigate('Seguimiento')}>
-            <Text style={styles.itemText}>Mi pedido</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity style={styles.item} onPress={() => onNavigate('MisPedidos')}><Text style={styles.itemText}>Mis pedidos</Text></TouchableOpacity>
         {esAdmin && (
           <TouchableOpacity style={styles.item} onPress={() => onNavigate('PanelAdmin')}>
             <Text style={styles.itemText}>Panel de administración</Text>

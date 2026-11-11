@@ -109,6 +109,7 @@ CREATE TABLE usuarios (
 -- -----------------------------------------------------------------------------
 CREATE TABLE ventas (
   id               INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  numero           VARCHAR(20)   NULL,
   usuario_id       INT UNSIGNED  NOT NULL,
   cupon_id         INT UNSIGNED  NULL,
   fecha            TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -118,12 +119,14 @@ CREATE TABLE ventas (
   total            DECIMAL(10,2) NOT NULL,
   metodo_pago      ENUM('credito','debito','rapipago') NOT NULL,
   estado           ENUM('pendiente','pagada','cancelada') NOT NULL DEFAULT 'pendiente',
+  estado_pedido    ENUM('confirmado','preparando','en_camino','listo_para_retirar','entregado','cancelado') NOT NULL DEFAULT 'confirmado',
   codigo_rapipago  VARCHAR(20)   NULL,
   con_envio        TINYINT(1)    NOT NULL DEFAULT 0,
   direccion_envio  VARCHAR(200)  NULL,
   localidad_envio  VARCHAR(100)  NULL,
   distancia_km     DECIMAL(6,2)  NULL,
   PRIMARY KEY (id),
+  UNIQUE KEY uq_ventas_numero (numero),
   KEY idx_ventas_fecha (fecha),
   CONSTRAINT fk_ventas_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios (id),
   CONSTRAINT fk_ventas_cupon   FOREIGN KEY (cupon_id)   REFERENCES cupones (id) ON DELETE SET NULL,

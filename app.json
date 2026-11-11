@@ -9,18 +9,10 @@
     "ios": {
       "supportsTablet": true
     },
-    "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#FFF3D6",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      }
-    },
     "web": {
       "favicon": "./assets/images/favicon.png"
     },
-    "plugins": [
-      "expo-status-bar"
-    ]
+    "plugins": ["expo-status-bar", ["expo-image-picker", {"photosPermission":"Dulces Lucho usa tus fotos para publicar productos."}], ["expo-notifications", {"icon":"./assets/images/icon.png","color":"#c77b00"}]],
+    "android": {"adaptiveIcon":{"backgroundColor":"#FFF3D6","foregroundImage":"./assets/images/android-icon-foreground.png","monochromeImage":"./assets/images/android-icon-monochrome.png"},"permissions":["POST_NOTIFICATIONS"]}
   }
 }

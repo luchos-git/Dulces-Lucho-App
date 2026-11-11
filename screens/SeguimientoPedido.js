@@ -4,8 +4,9 @@ import { usePedido } from '../context/PedidoContext';
 import { pasosDe, indicePaso } from '../data/seguimiento';
 import { cancelarAvisos } from '../services/notificaciones';
 
-export default function SeguimientoPedido({ navigation }) {
-  const { pedidoActual, limpiarPedido } = usePedido();
+export default function SeguimientoPedido({ navigation, route }) {
+  const { pedidoActual, pedidos, limpiarPedido } = usePedido();
+  const pedidoSeleccionado = route.params?.pedidoId ? pedidos.find((p) => p.id === route.params.pedidoId) : pedidoActual;
   const [ahora, setAhora] = useState(Date.now());
 
   // Reloj que actualiza la pantalla cada segundo
@@ -14,7 +15,7 @@ export default function SeguimientoPedido({ navigation }) {
     return () => clearInterval(reloj);
   }, []);
 
-  if (!pedidoActual) {
+  if (!pedidoSeleccionado) {
     return (
       <View style={styles.vacio}>
         <Text style={styles.vacioTexto}>No tenés ningún pedido en curso.</Text>
@@ -25,8 +26,8 @@ export default function SeguimientoPedido({ navigation }) {
     );
   }
 
-  const pasos = pasosDe(pedidoActual);
-  const segundos = (ahora - pedidoActual.inicio) / 1000;
+  const pasos = pasosDe(pedidoSeleccionado);
+  const segundos = (ahora - pedidoSeleccionado.inicio) / 1000;
   const indice = indicePaso(pasos, segundos);
   const pasoActual = pasos[indice];
   const terminado = indice === pasos.length - 1;
@@ -35,7 +36,7 @@ export default function SeguimientoPedido({ navigation }) {
 
   const finalizar = () => {
     navigation.popToTop();
-    limpiarPedido();
+    limpiarPedido(pedidoSeleccionado.id);
     cancelarAvisos();
   };
 
@@ -46,7 +47,7 @@ export default function SeguimientoPedido({ navigation }) {
         <Text style={styles.estadoIcono}>{pasoActual.icono}</Text>
         <Text style={styles.estadoTitulo}>{pasoActual.titulo}</Text>
         <Text style={styles.estadoDetalle}>{pasoActual.detalle}</Text>
-        <Text style={styles.estadoPedido}>Pedido #{pedidoActual.numero}</Text>
+        <Text style={styles.estadoPedido}>Pedido #{pedidoSeleccionado.numero}</Text>
       </View>
 
       {/* Etapas */}
@@ -77,11 +78,11 @@ export default function SeguimientoPedido({ navigation }) {
       {/* Entrega */}
       <View style={styles.caja}>
         <Text style={styles.titulo}>Entrega</Text>
-        {pedidoActual.conEnvio ? (
+        {pedidoSeleccionado.conEnvio ? (
           <View>
-            <Text>📍 {pedidoActual.destino || `${pedidoActual.direccion}, ${pedidoActual.localidad}`}</Text>
-            {pedidoActual.distanciaKm !== null && (
-              <Text style={styles.nota}>A {pedidoActual.distanciaKm.toFixed(1)} km del local</Text>
+            <Text>📍 {pedidoSeleccionado.destino || `${pedidoSeleccionado.direccion}, ${pedidoSeleccionado.localidad}`}</Text>
+            {pedidoSeleccionado.distanciaKm !== null && (
+              <Text style={styles.nota}>A {pedidoSeleccionado.distanciaKm.toFixed(1)} km del local</Text>
             )}
           </View>
         ) : (
@@ -92,7 +93,7 @@ export default function SeguimientoPedido({ navigation }) {
       {/* Productos */}
       <View style={styles.caja}>
         <Text style={styles.titulo}>Tu pedido</Text>
-        {pedidoActual.items.map((item) => (
+        {pedidoSeleccionado.items.map((item) => (
           <View key={item.id} style={styles.filaMonto}>
             <Text style={styles.nombreItem} numberOfLines={1}>
               {item.cantidad} x {item.nombre}
@@ -102,22 +103,22 @@ export default function SeguimientoPedido({ navigation }) {
         ))}
         <View style={[styles.filaMonto, styles.filaTotal]}>
           <Text style={styles.totalTexto}>Total</Text>
-          <Text style={styles.totalTexto}>${pedidoActual.total}</Text>
+          <Text style={styles.totalTexto}>${pedidoSeleccionado.total}</Text>
         </View>
       </View>
 
       {/* Rapipago */}
-      {pedidoActual.codigoRapipago && (
+      {pedidoSeleccionado.codigoRapipago && (
         <View style={styles.caja}>
           <Text style={styles.titulo}>Pago en Rapipago</Text>
-          <Text style={styles.codigo}>{pedidoActual.codigoRapipago}</Text>
+          <Text style={styles.codigo}>{pedidoSeleccionado.codigoRapipago}</Text>
           <Text style={styles.nota}>Abonalo en cualquier sucursal con este código.</Text>
         </View>
       )}
 
       {/* Avisos */}
       <Text style={styles.avisos}>
-        {pedidoActual.avisosActivados
+        {pedidoSeleccionado.avisosActivados
           ? '🔔 Te avisamos con una notificación cuando cambie el estado de tu pedido.'
           : '🔕 Las notificaciones están desactivadas. Activalas en los ajustes del celular para recibir avisos; mientras tanto, mirá el estado acá.'}
       </Text>

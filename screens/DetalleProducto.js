@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Image } from 'react-native';
 import { useCarrito } from '../context/CarritoContext';
+import { useProductos } from '../context/ProductosContext';
 
 export default function DetalleProducto({ route, navigation }) {
   const { producto } = route.params;
   const { agregarAlCarrito } = useCarrito();
+  const { productos } = useProductos();
   const [cantidad, setCantidad] = useState(1);
 
   const sumar = () => setCantidad((c) => c + 1);
@@ -27,7 +29,7 @@ export default function DetalleProducto({ route, navigation }) {
 
   return (
     <ScrollView style={styles.container}>
-      <View style={styles.fotoGrande}><Text>Foto del producto</Text></View>
+      {producto.imagenUrl ? <Image source={{uri:producto.imagenUrl}} style={styles.fotoGrande} /> : <View style={styles.fotoGrande}><Text>Foto del producto</Text></View>}
 
       <View style={styles.info}>
         <Text style={styles.nombre}>{producto.nombre}</Text>
@@ -56,6 +58,7 @@ export default function DetalleProducto({ route, navigation }) {
         <TouchableOpacity style={styles.botonAgregar} onPress={agregar}>
           <Text style={styles.textoBotonAgregar}>Agregar al carrito</Text>
         </TouchableOpacity>
+        {productos.filter(p=>p.categoria===producto.categoria&&p.id!==producto.id).slice(0,2).map(p=><TouchableOpacity key={p.id} style={styles.parecido} onPress={()=>navigation.push('DetalleProducto',{producto:p})}><Text>{p.nombre}</Text><Text style={styles.precio}>${p.precio}</Text></TouchableOpacity>)}
       </View>
     </ScrollView>
   );
@@ -79,4 +82,5 @@ const styles = StyleSheet.create({
   textoBotonComprar: { color: '#fff', fontWeight: 'bold' },
   botonAgregar: { backgroundColor: '#ffcc80', padding: 14, borderRadius: 8, alignItems: 'center' },
   textoBotonAgregar: { fontWeight: 'bold' },
+  parecido: { backgroundColor:'#fff', borderRadius:8, padding:10, marginTop:10 },
 });

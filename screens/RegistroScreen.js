@@ -14,8 +14,8 @@ export default function RegistroScreen({ navigation }) {
   const [claveUnica, setClaveUnica] = useState('');
   const [error, setError] = useState('');
 
-  const crearCuenta = () => {
-    const resultado = registrar({
+  const crearCuenta = async () => {
+    const resultado = await registrar({
       nombre,
       email,
       password,

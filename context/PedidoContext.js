@@ -1,32 +1,3 @@
-import React, { createContext, useContext, useState } from 'react';
-
-const PedidoContext = createContext();
-
-// Guarda el pedido que está en curso (solo mientras la app está abierta).
-export function PedidoProvider({ children }) {
-  const [pedidoActual, setPedidoActual] = useState(null);
-
-  // datos: items, total, medioPago, codigoRapipago, conEnvio, direccion, localidad,
-  //        destino, distanciaKm, avisosActivados
-  const crearPedido = (datos) => {
-    const pedido = {
-      ...datos,
-      numero: Math.floor(1000 + Math.random() * 9000), // número de ejemplo
-      inicio: Date.now(),
-    };
-    setPedidoActual(pedido);
-    return pedido;
-  };
-
-  const limpiarPedido = () => setPedidoActual(null);
-
-  return (
-    <PedidoContext.Provider value={{ pedidoActual, crearPedido, limpiarPedido }}>
-      {children}
-    </PedidoContext.Provider>
-  );
-}
-
-export function usePedido() {
-  return useContext(PedidoContext);
-}
+import React,{createContext,useContext,useEffect,useState}from'react';import AsyncStorage from'@react-native-async-storage/async-storage';
+const C=createContext(),K='pedidos_dulces_lucho';
+export function PedidoProvider({children}){const[pedidos,setPedidos]=useState([]);useEffect(()=>{AsyncStorage.getItem(K).then(x=>x&&setPedidos(JSON.parse(x)))},[]);const guardar=x=>{setPedidos(x);AsyncStorage.setItem(K,JSON.stringify(x))};const crearPedido=d=>{const p={...d,id:`local-${Date.now()}`,numero:Math.floor(1000+Math.random()*9000),inicio:Date.now(),estado:'en_camino'};guardar([p,...pedidos]);return p};const finalizarPedido=id=>guardar(pedidos.map(p=>p.id===id?{...p,estado:'entregado',finalizadoEn:Date.now()}:p));const limpiarPedido=id=>finalizarPedido(id);const pedidoActual=pedidos.find(p=>p.estado!=='entregado')||null;return <C.Provider value={{pedidos,pedidoActual,crearPedido,finalizarPedido,limpiarPedido}}>{children}</C.Provider>};export const usePedido=()=>useContext(C);

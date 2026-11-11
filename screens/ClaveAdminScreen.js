@@ -15,13 +15,13 @@ export default function ClaveAdminScreen({ navigation }) {
     navigation.goBack();
   };
 
-  const verificar = () => {
+  const verificar = async () => {
     if (clave.length !== 6) {
       setError('La clave única tiene 6 números.');
       return;
     }
 
-    const resultado = verificarClaveAdmin(clave);
+    const resultado = await verificarClaveAdmin(clave);
     if (resultado.ok) {
       // App.js cambia de pantalla solo cuando la sesión queda iniciada
       return;

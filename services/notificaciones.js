@@ -37,13 +37,12 @@ export async function pedirPermisoNotificaciones() {
 }
 
 // Programa un aviso por cada etapa que tenga "aviso" (ver data/seguimiento.js)
-export async function programarAvisos(pasos) {
+export async function programarAvisos(pasos, pedidoId = 'pedido') {
   try {
-    await Notifications.cancelAllScheduledNotificationsAsync();
     for (const paso of pasos) {
       if (!paso.aviso) continue;
       await Notifications.scheduleNotificationAsync({
-        content: { title: paso.aviso.titulo, body: paso.aviso.cuerpo, sound: true },
+        content: { title: paso.aviso.titulo, body: paso.aviso.cuerpo, sound: true, data: { pedidoId } },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
           seconds: Math.max(1, paso.desdeSeg),

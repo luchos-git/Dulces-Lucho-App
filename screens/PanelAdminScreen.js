@@ -1,41 +1,8 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { useAuth } from '../context/AuthContext';
-
-export default function PanelAdminScreen() {
-  const { usuario, esAdmin } = useAuth();
-
-  if (!esAdmin) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.texto}>Esta sección es solo para administradores.</Text>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.container}>
-      <Text style={styles.titulo}>Panel de administración</Text>
-      <Text style={styles.texto}>Sesión iniciada como {usuario.nombre} ({usuario.email}).</Text>
-
-      <View style={styles.caja}>
-        <Text style={styles.cajaTitulo}>Próximamente</Text>
-        <Text style={styles.texto}>• Agregar productos nuevos (con ID automático)</Text>
-        <Text style={styles.texto}>• Ver y gestionar pedidos</Text>
-        <Text style={styles.texto}>• Administrar cupones</Text>
-        <Text style={styles.nota}>
-          Estas funciones necesitan guardar datos (backend), que por ahora está pausado por indicación del profesor.
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8E1', padding: 20 },
-  titulo: { fontSize: 22, fontWeight: 'bold', marginBottom: 6 },
-  texto: { color: '#555', marginBottom: 4 },
-  caja: { backgroundColor: '#fff', borderRadius: 10, padding: 14, marginTop: 16 },
-  cajaTitulo: { fontWeight: 'bold', marginBottom: 8 },
-  nota: { color: '#888', fontSize: 12, marginTop: 10 },
-});
+import React,{useState}from'react';import{Alert,Image,ScrollView,StyleSheet,Text,TextInput,TouchableOpacity,View}from'react-native';import*as ImagePicker from'expo-image-picker';import{useAuth}from'../context/AuthContext';import{useProductos}from'../context/ProductosContext';import{subirImagenProducto}from'../services/api';
+const empty={nombre:'',categoria:'',descripcion:'',precio:'',imagenUrl:'',asset:null};
+export default function PanelAdminScreen(){const{usuario,esAdmin}=useAuth(),{productos,agregarProducto,editarProducto,eliminarProducto}=useProductos(),[f,setF]=useState(empty),[id,setId]=useState(null),[saving,setSaving]=useState(false),set=(k,v)=>setF(x=>({...x,[k]:v}));if(!esAdmin)return <View style={s.container}><Text>Esta sección es solo para administradores.</Text></View>;
+const foto=async()=>{const p=await ImagePicker.requestMediaLibraryPermissionsAsync();if(!p.granted)return Alert.alert('Permiso necesario','Permití fotos para cargar la imagen.');const r=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:true,aspect:[1,1],quality:.8});if(!r.canceled)set('asset',r.assets[0])};
+const guardar=async()=>{if(!f.nombre.trim()||!f.categoria.trim()||!f.precio.trim())return Alert.alert('Faltan datos','Completá nombre, categoría y precio.');setSaving(true);try{let imagenUrl=f.imagenUrl;if(f.asset)({imagenUrl}=await subirImagenProducto(f.asset));const d={...f,imagenUrl,precio:Number(f.precio)};const x=id?await editarProducto(id,d):await agregarProducto(d);Alert.alert(id?'Producto actualizado':'Producto agregado',`“${x.nombre}” ya está en el catálogo.`);setF(empty);setId(null)}catch(e){Alert.alert('No se pudo guardar',e.message)}finally{setSaving(false)}};
+const editar=p=>{setId(p.id);setF({nombre:p.nombre,categoria:p.categoria,descripcion:p.descripcion||'',precio:String(p.precio),imagenUrl:p.imagenUrl||'',asset:null})};
+return <ScrollView style={s.container}><Text style={s.titulo}>Panel de administración</Text><Text style={s.texto}>Sesión iniciada como {usuario.nombre}.</Text><View style={s.caja}><Text style={s.sub}>{id?'Editar producto':'Nuevo producto'}</Text>{[['nombre','Nombre'],['categoria','Categoría'],['descripcion','Descripción'],['precio','Precio']].map(([k,l])=><TextInput key={k} style={s.input} placeholder={l} value={f[k]} multiline={k==='descripcion'} keyboardType={k==='precio'?'numeric':'default'} onChangeText={v=>set(k,v)}/>)}<TouchableOpacity style={s.foto} onPress={foto}><Text>{f.asset||f.imagenUrl?'Cambiar foto':'Elegir foto'}</Text></TouchableOpacity>{(f.asset||f.imagenUrl)&&<Image style={s.preview} source={{uri:f.asset?.uri||f.imagenUrl}}/>}<TouchableOpacity style={s.boton} disabled={saving} onPress={guardar}><Text style={s.blanco}>{saving?'Guardando…':id?'Guardar cambios':'Agregar producto'}</Text></TouchableOpacity>{id&&<TouchableOpacity onPress={()=>{setF(empty);setId(null)}}><Text style={s.centrar}>Cancelar edición</Text></TouchableOpacity>}</View><Text style={s.sub}>Productos publicados</Text>{productos.map(p=><View key={p.id} style={s.item}>{p.imagenUrl?<Image style={s.mini} source={{uri:p.imagenUrl}}/>:<View style={s.mini}><Text>Foto</Text></View>}<View style={{flex:1,marginLeft:10}}><Text style={{fontWeight:'bold'}}>{p.nombre}</Text><Text>{p.categoria} · ${p.precio}</Text></View><TouchableOpacity onPress={()=>editar(p)}><Text style={s.edit}>Editar</Text></TouchableOpacity><TouchableOpacity onPress={()=>Alert.alert('Ocultar producto',`¿Ocultar “${p.nombre}”?`,[{text:'Cancelar'},{text:'Ocultar',style:'destructive',onPress:()=>eliminarProducto(p.id).catch(e=>Alert.alert('Error',e.message))}])}><Text style={s.del}>Ocultar</Text></TouchableOpacity></View>)}</ScrollView>}
+const s=StyleSheet.create({container:{flex:1,backgroundColor:'#FFF8E1',padding:20},titulo:{fontSize:22,fontWeight:'bold',marginBottom:6},texto:{color:'#555'},caja:{backgroundColor:'#fff',borderRadius:10,padding:14,marginVertical:16},sub:{fontSize:16,fontWeight:'bold',marginBottom:8},input:{backgroundColor:'#fff',borderWidth:1,borderColor:'#ddd',borderRadius:8,padding:10,marginBottom:8},foto:{backgroundColor:'#ffcc80',borderRadius:8,padding:11,alignItems:'center'},preview:{height:160,borderRadius:8,marginTop:10},boton:{backgroundColor:'#007bff',borderRadius:8,padding:13,alignItems:'center',marginTop:10},blanco:{color:'#fff',fontWeight:'bold'},centrar:{textAlign:'center',marginTop:12},item:{backgroundColor:'#fff',borderRadius:10,padding:10,marginBottom:10,flexDirection:'row',alignItems:'center'},mini:{width:52,height:52,borderRadius:6,backgroundColor:'#eee',justifyContent:'center',alignItems:'center'},edit:{color:'#007bff',marginLeft:8},del:{color:'#e57373',marginLeft:8}});

@@ -8,13 +8,13 @@ export default function LoginScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  const ingresar = () => {
+  const ingresar = async () => {
     if (!email.trim() || !password) {
       setError('Completá el correo y la contraseña.');
       return;
     }
 
-    const resultado = iniciarSesion(email, password);
+    const resultado = await iniciarSesion(email, password);
     if (!resultado.ok) {
       setError(resultado.error);
       return;

@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from 'react-native';
-
-import {productos} from '../data/productos';
-
-const listaCategorias = ['Todas', ...new Set(productos.map((p) => p.categoria))];
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image } from 'react-native';
+import { useProductos } from '../context/ProductosContext';
 
 export default function HomeScreen({ navigation }) {
+  const { productos } = useProductos();
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('Todas');
   const [precioMin, setPrecioMin] = useState('');
   const [precioMax, setPrecioMax] = useState('');
@@ -16,6 +14,7 @@ export default function HomeScreen({ navigation }) {
   const rangoInvalido =
     precioMin !== '' && precioMax !== '' && Number(precioMin) > Number(precioMax);
 
+  const listaCategorias = ['Todas', ...new Set(productos.map((p) => p.categoria))];
   const productosFiltrados = rangoInvalido
     ? []
     : productos.filter((p) => {
@@ -40,7 +39,7 @@ export default function HomeScreen({ navigation }) {
       <View style={styles.fila}>
         {productos.slice(0, 2).map((prod) => (
           <TouchableOpacity key={prod.id} style={styles.card} onPress={() => irADetalle(prod)}>
-            <View style={styles.fotoPlaceholder}><Text>Foto</Text></View>
+            {prod.imagenUrl ? <Image source={{uri:prod.imagenUrl}} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text>Foto</Text></View>}
             <Text numberOfLines={1}>{prod.nombre}</Text>
             <Text style={styles.precio}>${prod.precio}</Text>
           </TouchableOpacity>
@@ -97,7 +96,7 @@ export default function HomeScreen({ navigation }) {
           <View style={styles.grid}>
             {categoriasAgrupadas[nombreCategoria].map((prod) => (
               <TouchableOpacity key={prod.id} style={styles.cardGrid} onPress={() => irADetalle(prod)}>
-                <View style={styles.fotoPlaceholder}><Text>Foto</Text></View>
+                {prod.imagenUrl ? <Image source={{uri:prod.imagenUrl}} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text>Foto</Text></View>}
                 <Text style={styles.nombreProd} numberOfLines={2}>{prod.nombre}</Text>
                 <Text style={styles.precio}>${prod.precio}</Text>
               </TouchableOpacity>

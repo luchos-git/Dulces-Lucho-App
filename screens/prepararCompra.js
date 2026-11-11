@@ -160,7 +160,7 @@ export default function PrepararCompra({ route, navigation }) {
               avisosActivados,
             });
 
-            if (avisosActivados) await programarAvisos(pasosDe(pedido));
+            if (avisosActivados) await programarAvisos(pasosDe(pedido), pedido.id);
 
             // Vuelve al inicio y abre el seguimiento (el botón "atrás" lleva al inicio)
             navigation.reset({ index: 1, routes: [{ name: 'Inicio' }, { name: 'Seguimiento' }] });
