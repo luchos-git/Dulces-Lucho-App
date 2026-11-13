@@ -1,3 +1,4 @@
+// explicación del archivo: reúne los datos de entrega, cupón y medio de pago y crea el pedido dentro de la app
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { cupones } from '../data/cupones';
@@ -36,6 +37,7 @@ export default function PrepararCompra({ route, navigation }) {
   // La entrega arranca con lo que se eligió antes (carrito o "Comprar ahora") y se puede cambiar acá
   const entrega = useEntrega(entregaInicial);
 
+  // datos que se ingresan para aplicar descuentos y seleccionar el medio de pago
   const [codigoCupon, setCodigoCupon] = useState('');
   const [cuponAplicado, setCuponAplicado] = useState(null);
   const [errorCupon, setErrorCupon] = useState('');
@@ -106,6 +108,7 @@ export default function PrepararCompra({ route, navigation }) {
     return null;
   };
 
+  // el pago se simula en la app y no se envía a una pasarela ni a una ruta de ventas de mysql
   // ---- Confirmar ----
   const confirmarCompra = () => {
     // 1) Tiene que haber un medio de pago elegido
@@ -171,6 +174,7 @@ export default function PrepararCompra({ route, navigation }) {
     );
   };
 
+  // controla si ya se eligió una forma de pago para habilitar la confirmación
   const puedeConfirmar = medioPago !== null;
 
   return (

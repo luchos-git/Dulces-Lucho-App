@@ -1,3 +1,4 @@
+// explicación del archivo: archivo de diseño general de una plantilla expo router que no participa en la navegación activa de esta app
 import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
 import { useColorScheme } from 'react-native';
 

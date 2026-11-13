@@ -1,9 +1,11 @@
+// explicación del archivo: arma el menú lateral que permite moverse entre las secciones y cerrar sesión
 import React, { useEffect, useRef } from 'react';
 import { Animated, TouchableOpacity, TouchableWithoutFeedback, View, Text, StyleSheet, Dimensions } from 'react-native';
 
 const { width } = Dimensions.get('window');
 const DRAWER_WIDTH = width * 0.72;
 
+// arma el menú que se abre desde el botón lateral de la cabecera
 export default function DrawerMenu({ visible, onClose, onNavigate, usuario, esAdmin, hayPedido, onLogout }) {
   const translateX = useRef(new Animated.Value(DRAWER_WIDTH)).current;
 
@@ -39,6 +41,8 @@ export default function DrawerMenu({ visible, onClose, onNavigate, usuario, esAd
           <Text style={styles.itemText}>Carrito</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.item} onPress={() => onNavigate('MisPedidos')}><Text style={styles.itemText}>Mis pedidos</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.item} onPress={() => onNavigate('Perfil')}><Text style={styles.itemText}>Mi perfil</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.item} onPress={() => onNavigate('Configuracion')}><Text style={styles.itemText}>Configuración</Text></TouchableOpacity>
         {esAdmin && (
           <TouchableOpacity style={styles.item} onPress={() => onNavigate('PanelAdmin')}>
             <Text style={styles.itemText}>Panel de administración</Text>

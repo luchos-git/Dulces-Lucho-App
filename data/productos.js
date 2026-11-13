@@ -1,3 +1,4 @@
+// explicación del archivo: contiene productos de muestra que se usan como apoyo cuando todavía no hay datos guardados
 // ---------------------------------------------------------------------------
 // CATÁLOGO DE DULCES LUCHO
 // Productos reales del emprendimiento: bolsitas selladas con obleas Smacks de

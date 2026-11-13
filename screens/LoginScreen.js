@@ -1,13 +1,16 @@
+// explicación del archivo: presenta el formulario de inicio de sesión y deriva al paso de clave cuando la cuenta es administradora
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Image } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 
 export default function LoginScreen({ navigation }) {
+  // toma la función del contexto y guarda los datos escritos en el formulario
   const { iniciarSesion } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
+  // valida los campos y consulta el backend para iniciar la sesión
   const ingresar = async () => {
     if (!email.trim() || !password) {
       setError('Completá el correo y la contraseña.');
@@ -29,6 +32,7 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  // muestra el formulario de acceso y los enlaces a registro y recuperación de administrador
   return (
     <ScrollView
       style={styles.container}
@@ -75,6 +79,7 @@ export default function LoginScreen({ navigation }) {
   );
 }
 
+// estilos de los campos, botones y textos de la pantalla
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF8E1' },
   contenido: { flexGrow: 1, justifyContent: 'center', padding: 24 },

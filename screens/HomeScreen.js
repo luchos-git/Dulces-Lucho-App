@@ -1,8 +1,16 @@
+// explicación del archivo: muestra el catálogo de productos y permite filtrarlo por categoría y rango de precios
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image } from 'react-native';
 import { useProductos } from '../context/ProductosContext';
 
+function iconoCategoria(categoria) {
+  if (categoria === 'Jugos') return '🧃';
+  if (categoria === 'Combos') return '🍬';
+  return '🍫';
+}
+
 export default function HomeScreen({ navigation }) {
+  // obtiene el catálogo compartido y guarda los valores de los filtros
   const { productos } = useProductos();
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('Todas');
   const [precioMin, setPrecioMin] = useState('');
@@ -15,6 +23,7 @@ export default function HomeScreen({ navigation }) {
     precioMin !== '' && precioMax !== '' && Number(precioMin) > Number(precioMax);
 
   const listaCategorias = ['Todas', ...new Set(productos.map((p) => p.categoria))];
+  // combina el filtro de categoría con los límites de precio seleccionados
   const productosFiltrados = rangoInvalido
     ? []
     : productos.filter((p) => {
@@ -31,6 +40,7 @@ export default function HomeScreen({ navigation }) {
     return acc;
   }, {});
 
+  // muestra los filtros y los productos agrupados por categoría
   return (
     <ScrollView style={styles.container}>
       <View style={styles.banner}><Text>Banner de Promo/Evento</Text></View>
@@ -39,7 +49,7 @@ export default function HomeScreen({ navigation }) {
       <View style={styles.fila}>
         {productos.slice(0, 2).map((prod) => (
           <TouchableOpacity key={prod.id} style={styles.card} onPress={() => irADetalle(prod)}>
-            {prod.imagenUrl ? <Image source={{uri:prod.imagenUrl}} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text>Foto</Text></View>}
+            {prod.imagenUrl ? <Image source={{uri:prod.imagenUrl}} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
             <Text numberOfLines={1}>{prod.nombre}</Text>
             <Text style={styles.precio}>${prod.precio}</Text>
           </TouchableOpacity>
@@ -96,7 +106,7 @@ export default function HomeScreen({ navigation }) {
           <View style={styles.grid}>
             {categoriasAgrupadas[nombreCategoria].map((prod) => (
               <TouchableOpacity key={prod.id} style={styles.cardGrid} onPress={() => irADetalle(prod)}>
-                {prod.imagenUrl ? <Image source={{uri:prod.imagenUrl}} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text>Foto</Text></View>}
+                {prod.imagenUrl ? <Image source={{uri:prod.imagenUrl}} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
                 <Text style={styles.nombreProd} numberOfLines={2}>{prod.nombre}</Text>
                 <Text style={styles.precio}>${prod.precio}</Text>
               </TouchableOpacity>
@@ -108,6 +118,7 @@ export default function HomeScreen({ navigation }) {
   );
 }
 
+// estilos del catálogo, filtros y tarjetas de productos
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF8E1' },
   banner: { height: 150, backgroundColor: '#ddd', margin: 10, justifyContent: 'center', alignItems: 'center' },
@@ -131,7 +142,8 @@ const styles = StyleSheet.create({
 
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingHorizontal: 10, paddingBottom: 10 },
   cardGrid: { width: '48%', backgroundColor: '#fff', padding: 10, alignItems: 'center', borderRadius: 10, marginBottom: 12 },
-  fotoPlaceholder: { width: '100%', height: 100, backgroundColor: '#eee', justifyContent: 'center', alignItems: 'center', borderRadius: 6, marginBottom: 6 },
+  fotoPlaceholder: { width: '100%', height: 100, backgroundColor: '#FFE8C5', justifyContent: 'center', alignItems: 'center', borderRadius: 6, marginBottom: 6 },
+  emojiFoto: { fontSize: 42 },
   nombreProd: { textAlign: 'center', marginBottom: 2 },
   precio: { fontWeight: 'bold', color: '#c77b00', marginTop: 2 },
 });

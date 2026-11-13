@@ -41,3 +41,7 @@ example
 # generated native folders
 /ios
 /android
+
+# archivos locales con direcciones y claves que no se deben subir
+.env
+backend/.env

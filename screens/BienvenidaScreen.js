@@ -1,10 +1,13 @@
+// explicación del archivo: muestra el saludo inicial después de ingresar y diferencia el mensaje de clientes y administradores
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 
 export default function BienvenidaScreen({ navigation }) {
+  // toma el nombre y el rol para adaptar el saludo de bienvenida
   const { usuario, esAdmin } = useAuth();
 
+  // muestra el logo, el mensaje correspondiente al rol y el acceso al catálogo
   return (
     <View style={styles.container}>
       <Image source={require('../assets/images/logo.png')} style={styles.logo} resizeMode="contain" />
@@ -29,6 +32,7 @@ export default function BienvenidaScreen({ navigation }) {
   );
 }
 
+// estilos de la pantalla de bienvenida
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF8E1', justifyContent: 'center', alignItems: 'center', padding: 24 },
   logo: { width: 230, height: 168 },

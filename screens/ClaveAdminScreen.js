@@ -1,7 +1,9 @@
+// explicación del archivo: pide y verifica la clave única de seis números antes de habilitar la sesión de administrador
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 
+// cantidad máxima de claves incorrectas antes de volver al inicio de sesión
 const MAX_INTENTOS = 3;
 
 export default function ClaveAdminScreen({ navigation }) {
@@ -10,11 +12,13 @@ export default function ClaveAdminScreen({ navigation }) {
   const [error, setError] = useState('');
   const [intentos, setIntentos] = useState(0);
 
+  // cancela la verificación pendiente y regresa al formulario anterior
   const volver = () => {
     cancelarClaveAdmin();
     navigation.goBack();
   };
 
+  // controla el formato de la clave y registra los intentos fallidos
   const verificar = async () => {
     if (clave.length !== 6) {
       setError('La clave única tiene 6 números.');
@@ -41,6 +45,7 @@ export default function ClaveAdminScreen({ navigation }) {
     setError(`${resultado.error} Te quedan ${MAX_INTENTOS - nuevosIntentos} intentos.`);
   };
 
+  // muestra el campo de seis números y el mensaje de error cuando corresponde
   return (
     <View style={styles.container}>
       <Text style={styles.icono}>🔐</Text>
@@ -75,6 +80,7 @@ export default function ClaveAdminScreen({ navigation }) {
   );
 }
 
+// estilos de la pantalla de verificación
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF8E1', justifyContent: 'center', padding: 24 },
   icono: { fontSize: 48, textAlign: 'center' },

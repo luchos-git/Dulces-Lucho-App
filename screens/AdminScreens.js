@@ -1,3 +1,4 @@
+// explicación del archivo: contiene pantallas administrativas de una versión anterior que se mantienen como referencia
 import React, { useState } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { useProductos } from '../context/ProductosContext';

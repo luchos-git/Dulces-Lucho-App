@@ -1,3 +1,4 @@
+// explicación del archivo: muestra los productos agregados, sus cantidades, la selección y el resumen antes de comprar
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { useCarrito } from '../context/CarritoContext';

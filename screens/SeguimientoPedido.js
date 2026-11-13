@@ -1,3 +1,4 @@
+// explicación del archivo: muestra el avance, los pasos y el resumen del pedido seleccionado
 import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { usePedido } from '../context/PedidoContext';

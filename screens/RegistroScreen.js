@@ -1,8 +1,10 @@
+// explicación del archivo: presenta el formulario para crear una cuenta de cliente o solicitar el alta de administrador con autorización
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 
 export default function RegistroScreen({ navigation }) {
+  // usa la función que valida y envía los datos de registro al backend
   const { registrar } = useAuth();
 
   const [rol, setRol] = useState('cliente');
@@ -14,6 +16,7 @@ export default function RegistroScreen({ navigation }) {
   const [claveUnica, setClaveUnica] = useState('');
   const [error, setError] = useState('');
 
+  // reúne los datos ingresados y muestra el resultado que devuelve la api
   const crearCuenta = async () => {
     const resultado = await registrar({
       nombre,
@@ -81,6 +84,7 @@ export default function RegistroScreen({ navigation }) {
         onChangeText={setRepetirPassword}
       />
 
+      {/* estos campos aparecen solamente cuando se elige crear una cuenta administradora */}
       {rol === 'admin' && (
         <View style={styles.cajaAdmin}>
           <Text style={styles.tituloAdmin}>Datos de administrador</Text>
@@ -121,6 +125,7 @@ export default function RegistroScreen({ navigation }) {
   );
 }
 
+// estilos del formulario y de los campos de autorización del administrador
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF8E1' },
   contenido: { padding: 24 },

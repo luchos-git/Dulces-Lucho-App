@@ -50,3 +50,26 @@ Son locales y se programan por pedido. La versión anterior cancelaba todos los 
 ## Seguridad y límites actuales
 
 La clave de ImgBB queda solo en `backend/.env`, nunca en JavaScript móvil ni en Git. Las contraseñas se guardan con bcrypt. La baja de productos es lógica para no romper ventas antiguas. La API de pedidos puede ampliarse para que el administrador actualice estados desde un panel operativo; actualmente la app conserva el historial local y la base ya tiene el campo `estado_pedido` para ese siguiente paso.
+
+
+## uso con expo go y thunder client
+
+la aplicación se ejecuta en el celular con expo go escaneando el qr, no necesita generar un apk. para eso expo se inicia desde la carpeta principal con `npx expo start --lan -c`
+
+el backend se inicia por separado desde `backend` con `npm start` y escucha en el puerto 3000. thunder client usa `http://localhost:3000` porque se ejecuta en la computadora. el celular debe usar la ip local de la computadora configurada en el archivo `.env` de la raíz mediante `EXPO_PUBLIC_API_URL`
+
+las rutas para crear cuentas, iniciar sesión y verificar administradores están documentadas con sus cuerpos json en `THUNDER_CLIENT_Y_EXPO_GO.md`
+
+el código actual no tiene una aprobación manual de administradores ni una ruta para aprobar pagos. las cuentas admin se crean con un código de autorización y una clave única. los pedidos de compra se guardan localmente en el celular y todavía no se envían a una ruta de ventas de mysql
+
+## archivos de configuración y recursos
+
+los json se explican en `CONFIGURACION_Y_ARCHIVOS_AUXILIARES.md`, porque agregar comentarios dentro de esos archivos rompería su formato. las imágenes se describen en `assets/README.md`
+
+
+para consultar la explicación archivo por archivo, revisá `INDICE_DE_ARCHIVOS.md`
+
+
+## límites de la versión actual
+
+el código de autorización también se comprueba desde el formulario móvil, por eso el valor de `data/usuarios.js` no debe considerarse secreto. el backend vuelve a comprobarlo desde `backend/.env`. las rutas de productos todavía no exigen una sesión ni un rol en el servidor, así que esta versión debe tratarse como un prototipo escolar y no como un sistema listo para publicar

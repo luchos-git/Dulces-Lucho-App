@@ -1,3 +1,5 @@
+// explicación del archivo: archivo principal de la aplicación móvil donde se conectan los contextos, las pantallas y la navegación
+// expo llega a este archivo desde index.js y usa react navigation, no la plantilla expo router que quedó dentro de src
 import * as React from 'react';
 import { Alert, TouchableOpacity, Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -20,6 +22,9 @@ import PrepararCompra from './screens/prepararCompra';
 import SeguimientoPedido from './screens/SeguimientoPedido';
 import HistorialPedidosScreen from './screens/HistorialPedidosScreen';
 import PanelAdminScreen from './screens/PanelAdminScreen';
+import PerfilScreen from './screens/PerfilScreen';
+import ConfiguracionScreen from './screens/ConfiguracionScreen';
+import FacturasScreen from './screens/FacturasScreen';
 import DrawerMenu from './navigation/DrawerMenu';
 
 const Stack = createNativeStackNavigator();
@@ -92,6 +97,9 @@ function Navegacion() {
             <Stack.Screen name="Seguimiento" component={SeguimientoPedido} options={{ title: 'Seguimiento del pedido' }} />
             <Stack.Screen name="MisPedidos" component={HistorialPedidosScreen} options={{ title: 'Mis pedidos' }} />
             <Stack.Screen name="PanelAdmin" component={PanelAdminScreen} options={{ title: 'Panel de administración' }} />
+            <Stack.Screen name="Perfil" component={PerfilScreen} options={{ title: 'Mi perfil' }} />
+            <Stack.Screen name="Configuracion" component={ConfiguracionScreen} options={{ title: 'Configuración' }} />
+            <Stack.Screen name="Facturas" component={FacturasScreen} options={{ title: 'Facturas y comprobantes' }} />
           </Stack.Group>
         )}
       </Stack.Navigator>
