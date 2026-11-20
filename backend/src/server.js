@@ -1,19 +1,336 @@
 import 'dotenv/config';
-import bcrypt from 'bcryptjs'; import cors from 'cors'; import express from 'express'; import multer from 'multer'; import mysql from 'mysql2/promise';
-const app=express(), port=Number(process.env.PORT||3000);
-const db=mysql.createPool({host:process.env.DB_HOST||'localhost',port:Number(process.env.DB_PORT||3306),user:process.env.DB_USER||'root',password:process.env.DB_PASSWORD||'',database:process.env.DB_NAME||'dulces_lucho',waitForConnections:true,connectionLimit:8});
-const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:5*1024*1024},fileFilter:(_r,f,cb)=>cb(null,f.mimetype.startsWith('image/'))});
-app.use(cors()); app.use(express.json({limit:'1mb'}));
-const select=`SELECT p.id,p.nombre,c.nombre categoria,p.descripcion,p.precio,p.imagen_url imagenUrl,p.activo FROM productos p JOIN categorias c ON c.id=p.categoria_id`;
-const validar=p=>!p.nombre?.trim()||!p.categoria?.trim()||!Number.isFinite(Number(p.precio))||Number(p.precio)<0?'Completá nombre, categoría y un precio válido.':null;
-async function cat(nombre,con=db){await con.query('INSERT IGNORE INTO categorias(nombre) VALUES(?)',[nombre.trim()]);const [[r]]=await con.query('SELECT id FROM categorias WHERE nombre=?',[nombre.trim()]);return r.id}
-app.get('/api/estado',async(_q,r)=>{try{await db.query('SELECT 1');r.json({ok:true})}catch{r.status(503).json({error:'MySQL no está disponible.'})}});
-app.get('/api/productos',async(_q,r)=>{try{const [x]=await db.query(`${select} WHERE p.activo=1 ORDER BY p.id DESC`);r.json(x)}catch{r.status(500).json({error:'No se pudieron consultar los productos.'})}});
-app.post('/api/productos',async(q,r)=>{const e=validar(q.body);if(e)return r.status(400).json({error:e});const {nombre,categoria,descripcion='',precio,imagenUrl=''}=q.body;try{const categoria_id=await cat(categoria);const [x]=await db.query('INSERT INTO productos(nombre,categoria_id,descripcion,precio,imagen_url)VALUES(?,?,?,?,?)',[nombre.trim(),categoria_id,descripcion.trim()||null,Number(precio),imagenUrl||null]);const [[p]]=await db.query(`${select} WHERE p.id=?`,[x.insertId]);r.status(201).json(p)}catch(err){console.error(err);r.status(500).json({error:'No se pudo guardar el producto.'})}});
-app.put('/api/productos/:id',async(q,r)=>{const e=validar(q.body),id=Number(q.params.id);if(e||!id)return r.status(400).json({error:e||'ID inválido.'});const {nombre,categoria,descripcion='',precio,imagenUrl=''}=q.body;try{const categoria_id=await cat(categoria);const [x]=await db.query('UPDATE productos SET nombre=?,categoria_id=?,descripcion=?,precio=?,imagen_url=? WHERE id=?',[nombre.trim(),categoria_id,descripcion.trim()||null,Number(precio),imagenUrl||null,id]);if(!x.affectedRows)return r.status(404).json({error:'Producto no encontrado.'});const [[p]]=await db.query(`${select} WHERE p.id=?`,[id]);r.json(p)}catch{r.status(500).json({error:'No se pudo actualizar el producto.'})}});
-app.delete('/api/productos/:id',async(q,r)=>{try{const[x]=await db.query('UPDATE productos SET activo=0 WHERE id=?',[Number(q.params.id)]);if(!x.affectedRows)return r.status(404).json({error:'Producto no encontrado.'});r.status(204).end()}catch{r.status(500).json({error:'No se pudo ocultar el producto.'})}});
-app.post('/api/imagenes/producto',upload.single('image'),async(q,r)=>{if(!q.file)return r.status(400).json({error:'Seleccioná una imagen.'});if(!process.env.IMGBB_API_KEY||process.env.IMGBB_API_KEY==='PEGAR_AQUI_LA_CLAVE_DE_IMGBB')return r.status(503).json({error:'Configurá IMGBB_API_KEY en backend/.env.'});try{const body=new URLSearchParams({image:q.file.buffer.toString('base64')});const x=await fetch(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`,{method:'POST',body});const d=await x.json();if(!x.ok||!d.success)throw Error();r.status(201).json({imagenUrl:d.data.url})}catch{r.status(502).json({error:'ImgBB no pudo subir la imagen.'})}});
-app.post('/api/auth/registro',async(q,r)=>{const{nombre,email,password,rol='cliente',codigoAutorizacion,claveUnica}=q.body;const mail=email?.trim().toLowerCase();if(!nombre?.trim()||!/^\S+@\S+\.\S+$/.test(mail)||!password||password.length<6)return r.status(400).json({error:'Revisá nombre, correo y contraseña.'});if(rol==='admin'&&(codigoAutorizacion!==process.env.ADMIN_REGISTRATION_CODE||!/^\d{6}$/.test(claveUnica||'')))return r.status(403).json({error:'Datos de administrador inválidos.'});try{const[x]=await db.query('INSERT INTO usuarios(nombre,email,password_hash,rol,clave_unica_hash)VALUES(?,?,?,?,?)',[nombre.trim(),mail,await bcrypt.hash(password,12),rol,rol==='admin'?await bcrypt.hash(claveUnica,12):null]);r.status(201).json({id:x.insertId,nombre:nombre.trim(),email:mail,rol})}catch(e){r.status(e.code==='ER_DUP_ENTRY'?409:500).json({error:e.code==='ER_DUP_ENTRY'?'Ya existe una cuenta con ese correo.':'No se pudo crear la cuenta.'})}});
-app.post('/api/auth/login',async(q,r)=>{try{const[[u]]=await db.query('SELECT * FROM usuarios WHERE email=? AND activo=1',[q.body.email?.trim().toLowerCase()]);if(!u||!await bcrypt.compare(q.body.password||'',u.password_hash))return r.status(401).json({error:'Correo o contraseña incorrectos.'});r.json({id:u.id,nombre:u.nombre,email:u.email,rol:u.rol,requiereClave:u.rol==='admin'})}catch{r.status(500).json({error:'No se pudo iniciar sesión.'})}});
-app.post('/api/auth/verificar-admin',async(q,r)=>{try{const[[u]]=await db.query('SELECT * FROM usuarios WHERE id=?',[q.body.usuarioId]);if(!u||u.rol!=='admin'||!await bcrypt.compare(q.body.clave||'',u.clave_unica_hash))return r.status(401).json({error:'La clave única es incorrecta.'});r.json({id:u.id,nombre:u.nombre,email:u.email,rol:u.rol})}catch{r.status(500).json({error:'No se pudo verificar.'})}});
-app.use((e,_q,r,_n)=>r.status(400).json({error:e instanceof multer.MulterError?'La imagen supera 5 MB.':'Error inesperado.'})); app.listen(port,()=>console.log(`API lista: http://localhost:${port}`));
+import bcrypt from 'bcryptjs';
+import cors from 'cors';
+import express from 'express';
+import multer from 'multer';
+import mysql from 'mysql2/promise';
+
+const app = express();
+const port = Number(process.env.PORT || 3000);
+
+// Pool reutilizable para las consultas a MySQL.
+const db = mysql.createPool({
+  host: process.env.DB_HOST || 'localhost',
+  port: Number(process.env.DB_PORT || 3306),
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'dulces_lucho',
+  waitForConnections: true,
+  connectionLimit: 8,
+});
+
+// Recibe imágenes en memoria (multipart desde Thunder Client o JSON base64 desde Expo Go). Límite: 5 MB.
+const MAX_IMAGEN = 5 * 1024 * 1024;
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_IMAGEN, files: 1 },
+});
+
+app.use(cors());
+// El JSON lleva la foto en base64 (ocupa ~33% más que el archivo), por eso el límite es mayor.
+app.use(express.json({ limit: '12mb' }));
+
+// Detecta si los bytes son realmente una imagen, sin depender del Content-Type que mande el cliente
+// (Thunder Client suele mandar application/octet-stream y Expo puede mandar el tipo vacío).
+function detectarImagen(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (buf.subarray(0, 3).toString('latin1') === 'GIF') return 'image/gif';
+  if (buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  if (buf.subarray(0, 2).toString('latin1') === 'BM') return 'image/bmp';
+  return null;
+}
+
+const selectProductos = `
+  SELECT p.id, p.nombre, c.nombre AS categoria, p.descripcion, p.precio,
+         p.imagen_url AS imagenUrl, p.imagenes_json AS imagenesJson, p.activo
+  FROM productos p
+  INNER JOIN categorias c ON c.id = p.categoria_id
+`;
+
+function validarProducto(producto) {
+  if (!producto || typeof producto !== 'object') return 'No se recibieron los datos del producto.';
+  if (!producto.nombre?.trim()) return 'Completá el nombre del producto.';
+  if (!producto.categoria?.trim()) return 'Elegí una categoría.';
+  if (producto.precio === '' || producto.precio === null || producto.precio === undefined ||
+      !Number.isFinite(Number(producto.precio)) || Number(producto.precio) <= 0) {
+    return 'Ingresá un precio mayor a cero.';
+  }
+  if (producto.imagenUrl && String(producto.imagenUrl).length > 255) {
+    return 'La dirección de la imagen supera los 255 caracteres.';
+  }
+  if (Array.isArray(producto.imagenes) && producto.imagenes.length > 3) return 'Cada producto puede tener como máximo tres imágenes.';
+  return null;
+}
+
+function normalizarProducto(producto) {
+  let imagenes = [];
+  try { imagenes = producto.imagenesJson ? JSON.parse(producto.imagenesJson) : []; } catch { imagenes = []; }
+  if (!imagenes.length && producto.imagenUrl) imagenes = [producto.imagenUrl];
+  return { ...producto, imagenes, imagenUrl: imagenes[0] || producto.imagenUrl || '' };
+}
+
+// Busca una categoría existente sin crear registros nuevos desde el formulario.
+async function obtenerCategoriaExistente(nombre) {
+  const [[categoria]] = await db.query(
+    `SELECT id, nombre FROM categorias
+     WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))
+     LIMIT 1`,
+    [nombre]
+  );
+  return categoria || null;
+}
+
+// Comprueba que el teléfono llega al proceso Express, sin consultar MySQL.
+app.get('/api/ping', (_req, res) => res.json({ ok: true, mensaje: 'Backend accesible por red.' }));
+
+app.get('/api/estado', async (_req, res) => {
+  try {
+    await db.query('SELECT 1');
+    res.json({ ok: true, mensaje: 'Backend y MySQL conectados.' });
+  } catch (error) {
+    console.error('Error de MySQL:', error.message);
+    res.status(503).json({ error: 'MySQL no está disponible. Revisá XAMPP y backend/.env.' });
+  }
+});
+
+// Lista las categorías cargadas en MySQL para mostrar un selector en el formulario.
+app.get('/api/categorias', async (_req, res) => {
+  try {
+    const [categorias] = await db.query(
+      'SELECT id, nombre FROM categorias ORDER BY nombre ASC'
+    );
+    // Garantiza las categorías principales sin duplicarlas.
+    for (const nombre of ['Bolsitas', 'Jugos', 'Combos']) {
+      await db.query('INSERT IGNORE INTO categorias (nombre) VALUES (?)', [nombre]);
+    }
+    const [actualizadas] = await db.query('SELECT id, nombre FROM categorias ORDER BY nombre ASC');
+    res.json(actualizadas);
+  } catch (error) {
+    console.error('Error al consultar categorías:', error.message);
+    res.status(500).json({ error: 'No se pudieron consultar las categorías.' });
+  }
+});
+
+// CREATE: agrega una categoría nueva evitando duplicados por mayúsculas o espacios.
+app.post('/api/categorias', async (req, res) => {
+  const nombre = String(req.body?.nombre || '').trim().replace(/\s+/g, ' ');
+  if (!nombre) return res.status(400).json({ error: 'Escribí el nombre de la categoría.' });
+  if (nombre.length > 60) return res.status(400).json({ error: 'La categoría no puede superar los 60 caracteres.' });
+  try {
+    const existente = await obtenerCategoriaExistente(nombre);
+    if (existente) return res.status(409).json({ error: `La categoría \"${existente.nombre}\" ya existe.` });
+    const [resultado] = await db.query('INSERT INTO categorias (nombre) VALUES (?)', [nombre]);
+    res.status(201).json({ id: resultado.insertId, nombre });
+  } catch (error) {
+    console.error('Error al crear categoría:', error.message);
+    res.status(500).json({ error: 'No se pudo crear la categoría.' });
+  }
+});
+
+// READ: muestra todos los productos activos.
+app.get('/api/productos', async (_req, res) => {
+  try {
+    const [productos] = await db.query(`${selectProductos} WHERE p.activo = 1 ORDER BY p.id DESC`);
+    res.json(productos.map(normalizarProducto));
+  } catch (error) {
+    console.error('Error al consultar productos:', error.message);
+    res.status(500).json({ error: 'No se pudieron consultar los productos.' });
+  }
+});
+
+// READ: muestra un producto específico por su id.
+app.get('/api/productos/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID del producto no es válido.' });
+  try {
+    const [[producto]] = await db.query(`${selectProductos} WHERE p.id = ? AND p.activo = 1`, [id]);
+    if (!producto) return res.status(404).json({ error: 'No se encontró el producto.' });
+    res.json(normalizarProducto(producto));
+  } catch (error) {
+    console.error('Error al consultar producto:', error.message);
+    res.status(500).json({ error: 'No se pudo consultar el producto.' });
+  }
+});
+
+// CREATE: guarda un producto nuevo. La categoría debe existir previamente en MySQL.
+app.post('/api/productos', async (req, res) => {
+  const errorValidacion = validarProducto(req.body);
+  if (errorValidacion) return res.status(400).json({ error: errorValidacion });
+  const { nombre, categoria, descripcion = '', precio, imagenUrl = '', imagenes = [] } = req.body;
+  try {
+    const categoriaExistente = await obtenerCategoriaExistente(categoria);
+    if (!categoriaExistente) return res.status(400).json({ error: 'La categoría seleccionada no existe. Actualizá la lista y elegí una opción.' });
+
+    const [resultado] = await db.query(
+      'INSERT INTO productos (nombre, categoria_id, descripcion, precio, imagen_url, imagenes_json) VALUES (?, ?, ?, ?, ?, ?)',
+      [nombre.trim(), categoriaExistente.id, descripcion.trim() || null, Number(precio), (imagenes[0] || imagenUrl) || null, JSON.stringify(imagenes.slice(0, 3))]
+    );
+    const [[producto]] = await db.query(`${selectProductos} WHERE p.id = ?`, [resultado.insertId]);
+    res.status(201).json(normalizarProducto(producto));
+  } catch (error) {
+    console.error('Error al crear producto:', error.message);
+    res.status(500).json({ error: 'No se pudo publicar el producto.' });
+  }
+});
+
+// UPDATE: cambia los datos de un producto existente.
+app.put('/api/productos/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const errorValidacion = validarProducto(req.body);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID del producto no es válido.' });
+  if (errorValidacion) return res.status(400).json({ error: errorValidacion });
+
+  const { nombre, categoria, descripcion = '', precio, imagenUrl = '', imagenes = [] } = req.body;
+  try {
+    const [[existente]] = await db.query('SELECT id FROM productos WHERE id = ? AND activo = 1', [id]);
+    if (!existente) return res.status(404).json({ error: 'No se encontró un producto activo con ese ID.' });
+
+    const categoriaExistente = await obtenerCategoriaExistente(categoria);
+    if (!categoriaExistente) return res.status(400).json({ error: 'La categoría seleccionada no existe.' });
+
+    await db.query(
+      `UPDATE productos
+       SET nombre = ?, categoria_id = ?, descripcion = ?, precio = ?, imagen_url = ?, imagenes_json = ?
+       WHERE id = ? AND activo = 1`,
+      [nombre.trim(), categoriaExistente.id, descripcion.trim() || null, Number(precio), (imagenes[0] || imagenUrl) || null, JSON.stringify(imagenes.slice(0, 3)), id]
+    );
+    const [[producto]] = await db.query(`${selectProductos} WHERE p.id = ? AND p.activo = 1`, [id]);
+    res.json(normalizarProducto(producto));
+  } catch (error) {
+    console.error('Error al actualizar producto:', error.message);
+    res.status(500).json({ error: 'No se pudo actualizar el producto.' });
+  }
+});
+
+// DELETE: realiza una baja lógica para no romper las ventas que ya existen.
+app.delete('/api/productos/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID del producto no es válido.' });
+  try {
+    const [resultado] = await db.query('UPDATE productos SET activo = 0 WHERE id = ? AND activo = 1', [id]);
+    if (!resultado.affectedRows) return res.status(404).json({ error: 'El producto no existe o ya fue eliminado.' });
+    res.json({ ok: true, id, mensaje: 'Producto eliminado del catálogo.' });
+  } catch (error) {
+    console.error('Error al eliminar producto:', error.message);
+    res.status(500).json({ error: 'No se pudo eliminar el producto.' });
+  }
+});
+
+// Sube una imagen a ImgBB usando la clave guardada en backend/.env. Acepta dos formas de envío:
+//  - multipart/form-data con un archivo (Thunder Client). El nombre del campo puede ser cualquiera.
+//  - JSON { "image": "<base64>" } (la app en Expo Go).
+app.post('/api/imagenes/producto', upload.any(), async (req, res) => {
+  let buffer = req.files?.[0]?.buffer;
+  if (!buffer) {
+    const base64 = req.body?.image ?? req.body?.imagenBase64;
+    if (typeof base64 === 'string' && base64.trim()) {
+      buffer = Buffer.from(base64.trim().replace(/^data:[^;]+;base64,/, ''), 'base64');
+    }
+  }
+  if (!buffer?.length) {
+    return res.status(400).json({ error: 'No llegó ninguna imagen. En Thunder Client usá Body > Form y agregá un campo de tipo File.' });
+  }
+  if (buffer.length > MAX_IMAGEN) return res.status(413).json({ error: 'La imagen supera el límite de 5 MB.' });
+  if (!detectarImagen(buffer)) {
+    return res.status(400).json({ error: 'El archivo no es una imagen válida. Usá JPG, PNG, GIF, WEBP o BMP.' });
+  }
+
+  const clave = process.env.IMGBB_API_KEY;
+  if (!clave || clave === 'PEGAR_AQUI_LA_CLAVE_DE_IMGBB' || clave === 'colocar_la_clave_privada_de_imgbb') {
+    return res.status(503).json({ error: 'Falta configurar IMGBB_API_KEY en backend/.env.' });
+  }
+
+  try {
+    const cuerpo = new URLSearchParams({ image: buffer.toString('base64') });
+    const respuesta = await fetch(`https://api.imgbb.com/1/upload?key=${encodeURIComponent(clave)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: cuerpo.toString(),
+      signal: AbortSignal.timeout(30000),
+    });
+    const datos = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok || !datos.success || !datos.data?.url) {
+      console.error('ImgBB rechazó la imagen:', JSON.stringify(datos?.error || respuesta.status));
+      return res.status(502).json({
+        error: datos?.error?.message || `ImgBB rechazó la imagen (HTTP ${respuesta.status}). Revisá la clave y volvé a intentar.`,
+      });
+    }
+    res.status(201).json({ imagenUrl: datos.data.url, displayUrl: datos.data.display_url || datos.data.url });
+  } catch (error) {
+    console.error('Error al subir a ImgBB:', error.message);
+    const sinRed = error.name === 'TimeoutError' || error.cause?.code;
+    res.status(502).json({
+      error: sinRed
+        ? 'El backend no pudo comunicarse con ImgBB (sin internet o tiempo agotado). Revisá la conexión de la computadora.'
+        : `No se pudo completar la subida a ImgBB: ${error.message}`,
+    });
+  }
+});
+
+// Registro de cuentas.
+app.post('/api/auth/registro', async (req, res) => {
+  const { nombre, email, password, rol = 'cliente', codigoAutorizacion, claveUnica } = req.body;
+  const mail = email?.trim().toLowerCase();
+  if (!nombre?.trim() || !/^\S+@\S+\.\S+$/.test(mail || '') || !password || password.length < 6) {
+    return res.status(400).json({ error: 'Revisá nombre, correo y contraseña.' });
+  }
+  if (rol === 'admin' && (codigoAutorizacion !== process.env.ADMIN_REGISTRATION_CODE || !/^\d{6}$/.test(claveUnica || ''))) {
+    return res.status(403).json({ error: 'Datos de administrador inválidos.' });
+  }
+  try {
+    const [resultado] = await db.query(
+      'INSERT INTO usuarios (nombre, email, password_hash, rol, clave_unica_hash) VALUES (?, ?, ?, ?, ?)',
+      [nombre.trim(), mail, await bcrypt.hash(password, 12), rol, rol === 'admin' ? await bcrypt.hash(claveUnica, 12) : null]
+    );
+    res.status(201).json({ id: resultado.insertId, nombre: nombre.trim(), email: mail, rol });
+  } catch (error) {
+    res.status(error.code === 'ER_DUP_ENTRY' ? 409 : 500).json({ error: error.code === 'ER_DUP_ENTRY' ? 'Ya existe una cuenta con ese correo.' : 'No se pudo crear la cuenta.' });
+  }
+});
+
+// Inicio de sesión.
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const [[usuario]] = await db.query('SELECT * FROM usuarios WHERE email = ? AND activo = 1', [req.body.email?.trim().toLowerCase()]);
+    if (!usuario || !await bcrypt.compare(req.body.password || '', usuario.password_hash)) {
+      return res.status(401).json({ error: 'Correo o contraseña incorrectos.' });
+    }
+    res.json({ id: usuario.id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol, requiereClave: usuario.rol === 'admin' });
+  } catch (error) {
+    console.error('Error al iniciar sesión:', error.message);
+    res.status(500).json({ error: 'No se pudo iniciar sesión.' });
+  }
+});
+
+// Verificación adicional para administradores.
+app.post('/api/auth/verificar-admin', async (req, res) => {
+  try {
+    const [[usuario]] = await db.query('SELECT * FROM usuarios WHERE id = ?', [req.body.usuarioId]);
+    if (!usuario || usuario.rol !== 'admin' || !await bcrypt.compare(req.body.clave || '', usuario.clave_unica_hash || '')) {
+      return res.status(401).json({ error: 'La clave única es incorrecta.' });
+    }
+    res.json({ id: usuario.id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol });
+  } catch (error) {
+    console.error('Error al verificar administrador:', error.message);
+    res.status(500).json({ error: 'No se pudo verificar el administrador.' });
+  }
+});
+
+// Responde con un mensaje claro cuando Multer rechaza el archivo.
+app.use((error, _req, res, _next) => {
+  if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: 'La imagen supera el límite de 5 MB.' });
+  }
+  if (error.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'La imagen es demasiado pesada. Usá una de hasta 5 MB.' });
+  }
+  console.error('Error del servidor:', error.message);
+  res.status(400).json({ error: error.message || 'Error inesperado al procesar la solicitud.' });
+});
+
+app.listen(port, '0.0.0.0', () => {
+  console.log(`API lista en http://localhost:${port}`);
+  console.log(`API accesible desde la red local en el puerto ${port}`);
+});

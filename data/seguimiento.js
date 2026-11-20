@@ -1,3 +1,4 @@
+// explicación del archivo: define las etapas del pedido y calcula qué etapa corresponde según el tiempo transcurrido
 // ---------------------------------------------------------------------------
 // ETAPAS DEL SEGUIMIENTO DEL PEDIDO — es una SIMULACIÓN
 //

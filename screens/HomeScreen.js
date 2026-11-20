@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image } from 'react-native';
 import { useProductos } from '../context/ProductosContext';
+import SliderImagenes from '../components/SliderImagenes';
 
 function iconoCategoria(categoria) {
   if (categoria === 'Jugos') return '🧃';
@@ -48,11 +49,15 @@ export default function HomeScreen({ navigation }) {
       <Text style={styles.tituloSeccion}>Ofertas del día</Text>
       <View style={styles.fila}>
         {productos.slice(0, 2).map((prod) => (
-          <TouchableOpacity key={prod.id} style={styles.card} onPress={() => irADetalle(prod)}>
-            {prod.imagenUrl ? <Image source={{uri:prod.imagenUrl}} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
-            <Text numberOfLines={1}>{prod.nombre}</Text>
-            <Text style={styles.precio}>${prod.precio}</Text>
-          </TouchableOpacity>
+          <View key={prod.id} style={styles.card}>
+            <TouchableOpacity activeOpacity={0.85} onPress={() => irADetalle(prod)}>
+              {prod.imagenes?.length || prod.imagenUrl ? <SliderImagenes imagenes={prod.imagenes?.length ? prod.imagenes : [prod.imagenUrl]} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
+              <Text numberOfLines={1}>{prod.nombre}</Text>
+            </TouchableOpacity>
+            <View pointerEvents="none" style={styles.precioNoInteractivo}>
+              <Text style={styles.precio}>${prod.precio}</Text>
+            </View>
+          </View>
         ))}
       </View>
 
@@ -105,11 +110,15 @@ export default function HomeScreen({ navigation }) {
           <Text style={styles.tituloSeccion}>{nombreCategoria}</Text>
           <View style={styles.grid}>
             {categoriasAgrupadas[nombreCategoria].map((prod) => (
-              <TouchableOpacity key={prod.id} style={styles.cardGrid} onPress={() => irADetalle(prod)}>
-                {prod.imagenUrl ? <Image source={{uri:prod.imagenUrl}} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
-                <Text style={styles.nombreProd} numberOfLines={2}>{prod.nombre}</Text>
-                <Text style={styles.precio}>${prod.precio}</Text>
-              </TouchableOpacity>
+              <View key={prod.id} style={styles.cardGrid}>
+                <TouchableOpacity activeOpacity={0.85} onPress={() => irADetalle(prod)}>
+                  {prod.imagenes?.length || prod.imagenUrl ? <SliderImagenes imagenes={prod.imagenes?.length ? prod.imagenes : [prod.imagenUrl]} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
+                  <Text style={styles.nombreProd} numberOfLines={2}>{prod.nombre}</Text>
+                </TouchableOpacity>
+                <View pointerEvents="none" style={styles.precioNoInteractivo}>
+              <Text style={styles.precio}>${prod.precio}</Text>
+            </View>
+              </View>
             ))}
           </View>
         </View>
@@ -145,5 +154,6 @@ const styles = StyleSheet.create({
   fotoPlaceholder: { width: '100%', height: 100, backgroundColor: '#FFE8C5', justifyContent: 'center', alignItems: 'center', borderRadius: 6, marginBottom: 6 },
   emojiFoto: { fontSize: 42 },
   nombreProd: { textAlign: 'center', marginBottom: 2 },
+  precioNoInteractivo: { alignSelf: 'center', minHeight: 24, justifyContent: 'center' },
   precio: { fontWeight: 'bold', color: '#c77b00', marginTop: 2 },
 });

@@ -1,3 +1,4 @@
+-- explicación del archivo: reúne consultas para revisar productos, usuarios, ventas, cupones y ejemplos de operaciones sql
 -- =============================================================================
 --  DULCES LUCHO — CONSULTAS DE EJEMPLO
 --  Ejecutá primero dulces_lucho.sql. Cada consulta se puede correr por separado.

@@ -29,3 +29,12 @@ mysql -u root -p < dulces_lucho.sql
 - Administrador: `admin@dulceslucho.com` / `admin123` (clave única `482913`)
 
 Las contraseñas están guardadas cifradas (bcrypt). Los precios de los productos son de ejemplo.
+
+
+## diferencia entre sql y thunder client
+
+los comandos sql se ejecutan en phpmyadmin, mysql workbench o la consola mysql. thunder client sirve para probar rutas http del backend y no ejecuta sentencias sql directamente
+
+para consultar cuentas administradoras después de crearlas desde la app o thunder client, ejecutá `SELECT id, nombre, email, rol, activo FROM usuarios WHERE rol = 'admin';`
+
+el alta de administradores se hace desde `POST /api/auth/registro` con el código que figura en `backend/.env` y una clave única de seis números. no hay una tabla de solicitudes pendientes para aprobar manualmente

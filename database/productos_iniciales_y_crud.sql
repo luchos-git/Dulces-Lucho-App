@@ -1,3 +1,4 @@
+-- explicación del archivo: agrega categorías y productos de ejemplo y muestra consultas sql para crear, consultar, modificar y ocultar productos
 -- CRUD SQL de productos. La app usa estas mismas operaciones por API.
 USE dulces_lucho;
 INSERT INTO categorias(nombre) VALUES ('Alfajores'),('Chocolates'),('Caramelos'),('Bombones') ON DUPLICATE KEY UPDATE nombre=VALUES(nombre);

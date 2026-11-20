@@ -1,3 +1,4 @@
+// explicación del archivo: solicita permisos y programa o cancela notificaciones locales relacionadas con los pedidos
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 

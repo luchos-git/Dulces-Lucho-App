@@ -1,3 +1,4 @@
+// explicación del archivo: muestra las opciones de retiro o envío y reúne los datos necesarios para calcular el costo de entrega
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { calcularEnvio, UMBRAL_GRATIS_KM } from '../services/envio';

@@ -1,47 +1,48 @@
-# dulces lucho app
+# dulces lucho
 
-aplicación móvil hecha con expo y react native para consultar golosinas, armar un carrito, preparar compras y seguir pedidos. incluye un panel para administrar el catálogo, una api con express, mysql e imágenes alojadas en imgbb
+aplicación móvil hecha con expo y react native. se inicia con expo go mediante el qr; no necesita apk ni aab para probarse. incluye catálogo, carrito, compras, seguimiento, perfil, configuración, comprobantes y un panel de administración conectado a mysql.
 
-## iniciar el proyecto
+## iniciar la aplicación
 
-primero importá `database/dulces_lucho.sql` en mysql desde xampp o phpmyadmin
+1. encendé apache y mysql desde xampp.
+2. en una primera terminal de vs code, ejecutá `cd backend` y luego `npm start`. dejá esa terminal abierta.
+3. en una segunda terminal, desde la carpeta principal, ejecutá `npx expo start --lan -c`. escaneá el qr con expo go y dejá esa terminal abierta también.
 
-después copiá `backend/.env.example` como `backend/.env` y completá los datos de conexión de mysql y la clave de imgbb si vas a subir fotos
+el archivo `.env` de la carpeta principal configura la dirección del backend para el celular. en esta copia está puesta la ip que compartiste: `10.0.20.95`. si cambia la red, actualizá `EXPO_PUBLIC_API_URL` con la nueva ip de la computadora.
 
-abrí una terminal en `backend`, ejecutá `npm install` y después `npm start`
+el archivo `backend/.env` configura mysql e imgbb. no publiques esos archivos en github. el proyecto incluye la configuración local que ya habías compartido; revisala antes de entregar o publicar el repositorio.
 
-en la carpeta principal copiá `.env.example` como `.env`, reemplazá la ip de ejemplo por la ip local de tu pc y ejecutá `npm install`
+## formulario de administración
 
-por último ejecutá `npx expo start --lan -c` y escaneá el qr con expo go. no hace falta generar un apk para probar la aplicación en el celular
+la pantalla `PanelAdmin` tiene un formulario con nombre, categoría, descripción, precio e imagen. la categoría se elige desde una lista traída de mysql; no se escribe libremente. se puede elegir una foto desde el celular, verla antes de guardar y subirla a imgbb.
 
-## guías
+el formulario sirve tanto para publicar un producto como para modificar uno existente. debajo aparece la lista de productos con botones visibles de **Modificar** y **Eliminar**. al entrar a una ficha de producto, la cuenta administradora también ve las opciones **Modificar producto** y **Eliminar del catálogo**.
 
-`documentacion.md` explica la organización general y los módulos de la app
+la eliminación es lógica: el producto deja de aparecer en la tienda pero se conserva en mysql para no romper las ventas anteriores.
 
-`THUNDER_CLIENT_Y_EXPO_GO.md` muestra cómo probar el backend con thunder client y cómo conectar el teléfono por wifi
+## rutas de la api
 
-`CONFIGURACION_Y_ARCHIVOS_AUXILIARES.md` explica los archivos json y de configuración
+base local para thunder client: `http://localhost:3000`
 
-`assets/README.md` explica los recursos gráficos
+- `GET /api/estado`
+- `GET /api/categorias`
+- `GET /api/productos`
+- `GET /api/productos/:id`
+- `POST /api/productos`
+- `PUT /api/productos/:id`
+- `DELETE /api/productos/:id`
+- `POST /api/imagenes/producto` (form-data, campo `image`, tipo File)
+- `POST /api/auth/registro`
+- `POST /api/auth/login`
+- `POST /api/auth/verificar-admin`
 
+## documentos
 
-para consultar la explicación archivo por archivo, revisá `INDICE_DE_ARCHIVOS.md`
+- `CORRECCION_DISENO_Y_CRUD.md`: resumen de esta corrección y archivos modificados.
+- `THUNDER_CLIENT_PRODUCTOS.md`: pasos y cuerpos JSON para probar cada ruta.
+- `documentacion.md`: explicación general de la estructura.
+- `INDICE_DE_ARCHIVOS.md`: índice archivo por archivo.
 
-## Cambios de perfil, configuración y productos
+## dependencias
 
-La navegación principal ahora incluye las pantallas `Perfil`, `Configuracion` y `Facturas`. El perfil permite elegir una foto de la galería; esa foto se guarda en el almacenamiento local del teléfono. El menú de configuración muestra opciones distintas para clientes y administradores. Los resúmenes de compra se leen del historial local y aclaran que no son facturas fiscales.
-
-En la ficha de cada producto, los administradores pueden abrir el panel con el formulario ya completado para modificarlo o eliminarlo del catálogo. La eliminación usa la baja lógica que ya ofrece la API.
-
-### Dependencia para elegir fotos
-
-El proyecto utiliza `expo-image-picker` para elegir fotos de perfil y de productos. En la carpeta principal ejecutá:
-
-```bash
-npm install
-npx expo install expo-image-picker
-```
-
-### Iniciar la app con Expo Go
-
-En una terminal, iniciá el backend desde `backend` con `npm install` y `npm start`. En otra terminal, desde la carpeta principal, ejecutá `npx expo start --lan -c` y escaneá el QR con Expo Go. En el archivo `.env`, `EXPO_PUBLIC_API_URL` debe apuntar a la dirección IPv4 de la computadora, no a `localhost`, cuando se usa un celular físico.
+si es una carpeta nueva, ejecutá `npm install` en la carpeta principal y `npm install` dentro de `backend`. `expo-image-picker` ya está declarado en `package.json` y configurado en `app.json`.

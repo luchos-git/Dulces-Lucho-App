@@ -1,14 +1,15 @@
+// explicación del archivo: contiene cuentas de demostración y el código de autorización usado por el formulario de administrador
 // ---------------------------------------------------------------------------
 // DATOS DE EJEMPLO PARA EL PROTOTIPO
-// Las cuentas que se crean desde la app viven solo mientras la app está abierta
-// (no hay base de datos). Estas dos sirven para probar.
+// Estas cuentas sirven como respaldo de demostración si la api no está disponible
+// el registro real se guarda en mysql cuando el backend funciona correctamente.
 //
 //   Cliente:        cliente@dulceslucho.com  /  cliente123
 //   Administrador:  admin@dulceslucho.com    /  admin123   (clave única: 482913)
 // ---------------------------------------------------------------------------
 
-// Código que hay que ingresar para poder crear una cuenta de administrador.
-// Cambialo por uno propio. (En una app real esto se valida en el servidor.)
+// este valor permite validar el formulario antes de enviarlo
+// el backend vuelve a comprobarlo con ADMIN_REGISTRATION_CODE en backend/.env
 export const CODIGO_AUTORIZACION_ADMIN = 'DULCES-ADMIN-2026';
 
 export const usuariosIniciales = [

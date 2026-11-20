@@ -1,3 +1,4 @@
+// explicación del archivo: contiene una navegación alternativa de ejemplo que no es la navegación activa de esta versión
 import React from 'react';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import HomeScreen from '../screens/HomeScreen';

@@ -1,3 +1,4 @@
+// explicación del archivo: calcula la distancia y el costo del envío a partir de la dirección y la localidad ingresadas
 // ---------------------------------------------------------------------------
 // ¡IMPORTANTE! Estos dos datos son de EJEMPLO. Cambialos por los del local real.
 // Para sacar las coordenadas: en Google Maps u OpenStreetMap, clic derecho

@@ -183,3 +183,13 @@ la aplicación activa se carga desde `index.js` y `App.js`. la carpeta `src` con
 `assets/expo.icon/Assets/grid.png` es una imagen auxiliar de la plantilla de iconos
 
 `assets/images/` contiene el logo, los íconos de la app, la imagen de inicio y recursos de ejemplo de expo y react
+
+
+## ajustes de catálogo (13/11/2026)
+
+- `screens/PanelAdminScreen.js`: selector de categorías desde MySQL y selección de fotos desde el celular.
+- `services/api.js`: envío multipart de imágenes al backend.
+- `backend/src/server.js`: ruta `GET /api/categorias`, validación de categorías existentes y respuestas de error de ImgBB más claras.
+- `backend/.env`: configuración local de ImgBB y MySQL. Este archivo contiene una clave privada y no debe subirse a GitHub.
+- `database/unificar_categoria_jugo.sql`: corrección opcional para mover productos de una categoría singular `Jugo` a `Jugos`.
+- `PRUEBA_IMAGENES_Y_CATEGORIAS.md`: pasos para probar.

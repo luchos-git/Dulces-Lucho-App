@@ -1,3 +1,4 @@
+// explicación del archivo: guarda los productos del carrito y permite agregar, quitar, seleccionar y cambiar cantidades
 import React, { createContext, useContext, useState } from 'react';
 
 const CarritoContext = createContext();

@@ -1,3 +1,4 @@
+-- explicación del archivo: crea la base de datos, borra y vuelve a crear sus tablas y carga los registros iniciales para el funcionamiento de la app
 
 CREATE DATABASE IF NOT EXISTS dulces_lucho
   CHARACTER SET utf8mb4
@@ -28,7 +29,8 @@ CREATE TABLE productos (
   categoria_id  INT UNSIGNED  NOT NULL, 
   descripcion   TEXT          NULL, 
   precio        DECIMAL(10,2) NOT NULL, 
-  imagen_url    VARCHAR(255)  NULL, 
+  imagen_url    VARCHAR(255)  NULL,
+  imagenes_json LONGTEXT      NULL,
   activo        TINYINT(1)    NOT NULL DEFAULT 1, 
   creado_en     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP, 
   PRIMARY KEY (id), 

@@ -1,3 +1,4 @@
+// explicación del archivo: muestra una ventana pequeña para elegir cuántas unidades de un producto recomendado agregar al carrito
 import React, { useState, useEffect } from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 

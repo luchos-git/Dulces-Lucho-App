@@ -97,11 +97,9 @@ export default function CarritoScreen({ navigation }) {
       )}
 
       {items.map((item) => (
-        <TouchableOpacity
+        <View
           key={item.id}
           style={styles.filaItem}
-          activeOpacity={0.8}
-          onPress={() => irADetalle(item)}
         >
           <TouchableOpacity onPress={() => toggleSeleccionado(item.id)} style={styles.checkboxWrapper}>
             <View style={[styles.checkbox, item.seleccionado && styles.checkboxActivo]}>
@@ -109,11 +107,17 @@ export default function CarritoScreen({ navigation }) {
             </View>
           </TouchableOpacity>
 
-          <View style={styles.fotoPlaceholder}><Text>Foto</Text></View>
+          <TouchableOpacity activeOpacity={0.85} onPress={() => irADetalle(item)}>
+            <View style={styles.fotoPlaceholder}><Text>Foto</Text></View>
+          </TouchableOpacity>
 
           <View style={styles.infoItem}>
-            <Text style={styles.nombreItem}>{item.nombre}</Text>
-            <Text style={styles.precioItem}>${item.precio}</Text>
+            <TouchableOpacity activeOpacity={0.85} onPress={() => irADetalle(item)}>
+              <Text style={styles.nombreItem}>{item.nombre}</Text>
+            </TouchableOpacity>
+            <View pointerEvents="none">
+              <Text style={styles.precioItem}>${item.precio}</Text>
+            </View>
           </View>
 
           <View style={styles.controles}>
@@ -130,7 +134,7 @@ export default function CarritoScreen({ navigation }) {
               </TouchableOpacity>
             </View>
           </View>
-        </TouchableOpacity>
+        </View>
       ))}
 
       {items.length > 0 && (

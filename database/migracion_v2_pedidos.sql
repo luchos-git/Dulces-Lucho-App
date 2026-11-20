@@ -1,3 +1,4 @@
+-- explicación del archivo: actualiza una base de datos anterior para incorporar los campos necesarios para conservar el historial de pedidos
 -- Ejecutá este archivo solo sobre una base creada con una versión anterior.
 USE dulces_lucho;
 ALTER TABLE ventas
