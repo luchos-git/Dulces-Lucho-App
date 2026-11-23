@@ -1,7 +1,30 @@
 // Este archivo centraliza las llamadas de la aplicación al servidor.
 // En Expo Go se usa la IP de la computadora configurada en el .env de la carpeta principal.
 
-const base = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api').replace(/\/$/, '');
+const apiConfigurada = String(process.env.EXPO_PUBLIC_API_URL || '').trim();
+const base = apiConfigurada.replace(/\/$/, '');
+
+function obtenerBaseApi() {
+  if (!base) {
+    throw new Error(
+      'Falta configurar EXPO_PUBLIC_API_URL en el archivo .env de la carpeta principal. ' +
+      'Usá la dirección IPv4 de la computadora, por ejemplo http://192.168.1.100:3000/api.'
+    );
+  }
+
+  if (!/^https?:\/\//i.test(base) || !/\/api$/i.test(base)) {
+    throw new Error('EXPO_PUBLIC_API_URL debe ser una dirección http(s) que termine en /api.');
+  }
+
+  // En Expo Go, localhost apunta al propio teléfono y no a la computadora con el backend.
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(base)) {
+    throw new Error(
+      'La API está configurada con localhost. En Expo Go desde el celular, reemplazalo por la IPv4 de tu computadora.'
+    );
+  }
+
+  return base;
+}
 
 export async function api(ruta, opciones = {}) {
   const esFormulario = typeof FormData !== 'undefined' && opciones.body instanceof FormData;
@@ -12,15 +35,16 @@ export async function api(ruta, opciones = {}) {
     ...(opciones.headers || {}),
   };
 
+  const direccionBase = obtenerBaseApi();
   let respuesta;
   try {
-    respuesta = await fetch(`${base}${ruta}`, {
+    respuesta = await fetch(`${direccionBase}${ruta}`, {
       ...opciones,
       headers: encabezados,
     });
   } catch (error) {
     const detalle = error?.message ? ` Detalle: ${error.message}` : '';
-    throw new Error(`No se pudo conectar con ${base}${ruta}.${detalle} Comprobá que el backend siga activo, que la IP de .env sea la actual y que la red permita la comunicación entre dispositivos.`);
+    throw new Error(`No se pudo conectar con ${direccionBase}${ruta}.${detalle} Comprobá que el backend siga activo, que la IP de .env sea la actual y que la red permita la comunicación entre dispositivos.`);
   }
 
   const texto = await respuesta.text();
@@ -34,7 +58,9 @@ export async function api(ruta, opciones = {}) {
   }
 
   if (!respuesta.ok) {
-    throw new Error(datos?.error || `El servidor respondió con el código ${respuesta.status}.`);
+    const mensaje = datos?.error || `El servidor respondió con el código ${respuesta.status}.`;
+    const detalle = datos?.detalle ? `\nDetalle técnico: ${datos.detalle}` : '';
+    throw new Error(`${mensaje}${detalle}`);
   }
 
   return datos;

@@ -87,11 +87,17 @@ app.get('/api/ping', (_req, res) => res.json({ ok: true, mensaje: 'Backend acces
 
 app.get('/api/estado', async (_req, res) => {
   try {
-    await db.query('SELECT 1');
-    res.json({ ok: true, mensaje: 'Backend y MySQL conectados.' });
+    // Además de probar la conexión, verifica que exista la tabla y las columnas usadas por el registro.
+    await db.query(
+      'SELECT id, nombre, email, password_hash, rol, clave_unica_hash, activo FROM usuarios LIMIT 0'
+    );
+    res.json({ ok: true, mensaje: 'Backend, MySQL y tabla usuarios conectados.' });
   } catch (error) {
-    console.error('Error de MySQL:', error.message);
-    res.status(503).json({ error: 'MySQL no está disponible. Revisá XAMPP y backend/.env.' });
+    console.error('Error al verificar MySQL/tabla usuarios:', error.code || '', error.sqlMessage || error.message);
+    res.status(503).json({
+      error: 'No se pudo verificar la base de datos o la tabla usuarios. Revisá XAMPP, backend/.env y la estructura de la tabla.',
+      detalle: process.env.NODE_ENV === 'production' ? undefined : (error.sqlMessage || error.message),
+    });
   }
 });
 
@@ -271,22 +277,64 @@ app.post('/api/imagenes/producto', upload.any(), async (req, res) => {
 
 // Registro de cuentas.
 app.post('/api/auth/registro', async (req, res) => {
-  const { nombre, email, password, rol = 'cliente', codigoAutorizacion, claveUnica } = req.body;
-  const mail = email?.trim().toLowerCase();
-  if (!nombre?.trim() || !/^\S+@\S+\.\S+$/.test(mail || '') || !password || password.length < 6) {
-    return res.status(400).json({ error: 'Revisá nombre, correo y contraseña.' });
+  const cuerpo = req.body && typeof req.body === 'object' ? req.body : {};
+  const nombre = typeof cuerpo.nombre === 'string' ? cuerpo.nombre.trim() : '';
+  const mail = typeof cuerpo.email === 'string' ? cuerpo.email.trim().toLowerCase() : '';
+  const password = typeof cuerpo.password === 'string' ? cuerpo.password : '';
+  const rol = typeof cuerpo.rol === 'string' ? cuerpo.rol.trim().toLowerCase() : 'cliente';
+  const codigoAutorizacion = typeof cuerpo.codigoAutorizacion === 'string'
+    ? cuerpo.codigoAutorizacion.trim()
+    : '';
+  const claveUnica = typeof cuerpo.claveUnica === 'string' ? cuerpo.claveUnica.trim() : '';
+
+  if (!nombre || nombre.length > 100 || !/^\S+@\S+\.\S+$/.test(mail) || mail.length > 150 || password.length < 6) {
+    return res.status(400).json({ error: 'Revisá nombre, correo y contraseña (mínimo 6 caracteres). Verificá también que el nombre y el correo no sean demasiado largos.' });
   }
-  if (rol === 'admin' && (codigoAutorizacion !== process.env.ADMIN_REGISTRATION_CODE || !/^\d{6}$/.test(claveUnica || ''))) {
-    return res.status(403).json({ error: 'Datos de administrador inválidos.' });
+  if (!['cliente', 'admin'].includes(rol)) {
+    return res.status(400).json({ error: 'El tipo de cuenta seleccionado no es válido.' });
   }
+  if (rol === 'admin' && (
+    !process.env.ADMIN_REGISTRATION_CODE ||
+    codigoAutorizacion !== process.env.ADMIN_REGISTRATION_CODE.trim() ||
+    !/^\d{6}$/.test(claveUnica)
+  )) {
+    return res.status(403).json({ error: 'Datos de administrador inválidos. Revisá el código de autorización y la clave de seis números.' });
+  }
+
   try {
+    const passwordHash = await bcrypt.hash(password, 12);
+    const claveUnicaHash = rol === 'admin' ? await bcrypt.hash(claveUnica, 12) : null;
     const [resultado] = await db.query(
       'INSERT INTO usuarios (nombre, email, password_hash, rol, clave_unica_hash) VALUES (?, ?, ?, ?, ?)',
-      [nombre.trim(), mail, await bcrypt.hash(password, 12), rol, rol === 'admin' ? await bcrypt.hash(claveUnica, 12) : null]
+      [nombre, mail, passwordHash, rol, claveUnicaHash]
     );
-    res.status(201).json({ id: resultado.insertId, nombre: nombre.trim(), email: mail, rol });
+    console.log(`Cuenta creada correctamente: usuario ID ${resultado.insertId} (${rol}).`);
+    return res.status(201).json({ id: resultado.insertId, nombre, email: mail, rol });
   } catch (error) {
-    res.status(error.code === 'ER_DUP_ENTRY' ? 409 : 500).json({ error: error.code === 'ER_DUP_ENTRY' ? 'Ya existe una cuenta con ese correo.' : 'No se pudo crear la cuenta.' });
+    // El mensaje completo queda en la terminal para identificar problemas reales de esquema o conexión.
+    console.error('Error al registrar usuario:', {
+      code: error.code,
+      errno: error.errno,
+      sqlMessage: error.sqlMessage || error.message,
+    });
+
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'Ya existe una cuenta con ese correo.' });
+    }
+
+    let mensaje = 'No se pudo crear la cuenta. Revisá la terminal del backend para ver el error.';
+    if (error.code === 'ER_NO_SUCH_TABLE') {
+      mensaje = 'No existe la tabla usuarios en la base de datos configurada. Verificá DB_NAME y la importación del SQL.';
+    } else if (error.code === 'ER_BAD_FIELD_ERROR') {
+      mensaje = 'La tabla usuarios no tiene todas las columnas que necesita el registro. Compará su estructura con database/dulces_lucho.sql.';
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'PROTOCOL_CONNECTION_LOST') {
+      mensaje = 'El backend no puede conectarse con MySQL. Revisá que MySQL esté iniciado en XAMPP y los datos de backend/.env.';
+    }
+
+    return res.status(500).json({
+      error: mensaje,
+      detalle: process.env.NODE_ENV === 'production' ? undefined : (error.sqlMessage || error.message),
+    });
   }
 });
 
@@ -330,7 +378,19 @@ app.use((error, _req, res, _next) => {
   res.status(400).json({ error: error.message || 'Error inesperado al procesar la solicitud.' });
 });
 
-app.listen(port, '0.0.0.0', () => {
+app.listen(port, '0.0.0.0', async () => {
   console.log(`API lista en http://localhost:${port}`);
   console.log(`API accesible desde la red local en el puerto ${port}`);
+  try {
+    await db.query(
+      'SELECT id, nombre, email, password_hash, rol, clave_unica_hash, activo FROM usuarios LIMIT 0'
+    );
+    console.log('MySQL conectado y tabla usuarios verificada.');
+  } catch (error) {
+    console.error('ATENCIÓN: la API inició, pero no pudo verificar MySQL/usuarios:', {
+      code: error.code,
+      sqlMessage: error.sqlMessage || error.message,
+    });
+    console.error('Revisá XAMPP, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD y DB_NAME en backend/.env.');
+  }
 });

@@ -15,28 +15,35 @@ export default function RegistroScreen({ navigation }) {
   const [codigoAutorizacion, setCodigoAutorizacion] = useState('');
   const [claveUnica, setClaveUnica] = useState('');
   const [error, setError] = useState('');
+  const [cargando, setCargando] = useState(false);
 
   // reúne los datos ingresados y muestra el resultado que devuelve la api
   const crearCuenta = async () => {
-    const resultado = await registrar({
-      nombre,
-      email,
-      password,
-      repetirPassword,
-      rol,
-      codigoAutorizacion,
-      claveUnica,
-    });
-
-    if (!resultado.ok) {
-      setError(resultado.error);
-      return;
-    }
-
+    if (cargando) return;
     setError('');
-    Alert.alert('Cuenta creada', 'Ya podés iniciar sesión con tu correo y contraseña.', [
-      { text: 'Aceptar', onPress: () => navigation.goBack() },
-    ]);
+    setCargando(true);
+    try {
+      const resultado = await registrar({
+        nombre,
+        email,
+        password,
+        repetirPassword,
+        rol,
+        codigoAutorizacion,
+        claveUnica,
+      });
+
+      if (!resultado.ok) {
+        setError(resultado.error);
+        return;
+      }
+
+      Alert.alert('Cuenta creada', 'La cuenta se guardó en la base de datos. Ya podés iniciar sesión.', [
+        { text: 'Aceptar', onPress: () => navigation.goBack() },
+      ]);
+    } finally {
+      setCargando(false);
+    }
   };
 
   return (
@@ -114,12 +121,12 @@ export default function RegistroScreen({ navigation }) {
 
       {error !== '' && <Text style={styles.error}>{error}</Text>}
 
-      <TouchableOpacity style={styles.botonPrincipal} onPress={crearCuenta}>
-        <Text style={styles.botonPrincipalTexto}>Crear cuenta</Text>
+      <TouchableOpacity style={[styles.botonPrincipal, cargando && styles.botonDeshabilitado]} onPress={crearCuenta} disabled={cargando}>
+        <Text style={styles.botonPrincipalTexto}>{cargando ? 'Creando cuenta...' : 'Crear cuenta'}</Text>
       </TouchableOpacity>
 
       <Text style={styles.aviso}>
-        Prototipo: las cuentas se guardan solo mientras la app está abierta.
+        Tu cuenta se guarda en la base de datos de la tienda.
       </Text>
     </ScrollView>
   );
@@ -142,5 +149,6 @@ const styles = StyleSheet.create({
   error: { color: '#e57373', fontWeight: 'bold', marginBottom: 8 },
   botonPrincipal: { backgroundColor: '#007bff', padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 6 },
   botonPrincipalTexto: { color: '#fff', fontWeight: 'bold' },
+  botonDeshabilitado: { opacity: 0.6 },
   aviso: { color: '#888', fontSize: 12, textAlign: 'center', marginTop: 14 },
 });
