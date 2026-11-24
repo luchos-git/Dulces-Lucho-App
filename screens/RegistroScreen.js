@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import CampoPassword from '../components/CampoPassword';
 
 export default function RegistroScreen({ navigation }) {
   // usa la función que valida y envía los datos de registro al backend
@@ -9,6 +10,7 @@ export default function RegistroScreen({ navigation }) {
 
   const [rol, setRol] = useState('cliente');
   const [nombre, setNombre] = useState('');
+  const [telefono, setTelefono] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [repetirPassword, setRepetirPassword] = useState('');
@@ -25,6 +27,7 @@ export default function RegistroScreen({ navigation }) {
     try {
       const resultado = await registrar({
         nombre,
+        telefono,
         email,
         password,
         repetirPassword,
@@ -67,6 +70,14 @@ export default function RegistroScreen({ navigation }) {
       <TextInput style={styles.input} placeholder="Nombre" value={nombre} onChangeText={setNombre} />
       <TextInput
         style={styles.input}
+        placeholder="Número de teléfono (opcional)"
+        keyboardType="phone-pad"
+        value={telefono}
+        onChangeText={setTelefono}
+        maxLength={30}
+      />
+      <TextInput
+        style={styles.input}
         placeholder="Correo electrónico"
         keyboardType="email-address"
         autoCapitalize="none"
@@ -74,18 +85,16 @@ export default function RegistroScreen({ navigation }) {
         value={email}
         onChangeText={setEmail}
       />
-      <TextInput
+      <CampoPassword
         style={styles.input}
         placeholder="Contraseña (mínimo 6 caracteres)"
-        secureTextEntry
         autoCapitalize="none"
         value={password}
         onChangeText={setPassword}
       />
-      <TextInput
+      <CampoPassword
         style={styles.input}
         placeholder="Repetir contraseña"
-        secureTextEntry
         autoCapitalize="none"
         value={repetirPassword}
         onChangeText={setRepetirPassword}
@@ -107,11 +116,10 @@ export default function RegistroScreen({ navigation }) {
             value={codigoAutorizacion}
             onChangeText={setCodigoAutorizacion}
           />
-          <TextInput
+          <CampoPassword
             style={styles.input}
             placeholder="Clave única (6 números)"
             keyboardType="number-pad"
-            secureTextEntry
             maxLength={6}
             value={claveUnica}
             onChangeText={(texto) => setClaveUnica(texto.replace(/\D/g, ''))}
@@ -126,7 +134,7 @@ export default function RegistroScreen({ navigation }) {
       </TouchableOpacity>
 
       <Text style={styles.aviso}>
-        Tu cuenta se guarda en la base de datos de la tienda.
+        Tu cuenta se guarda en la base de datos. El teléfono es opcional y podés modificarlo desde Mi perfil.
       </Text>
     </ScrollView>
   );

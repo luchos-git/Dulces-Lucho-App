@@ -5,7 +5,7 @@ import { calcularEnvio, UMBRAL_GRATIS_KM } from '../services/envio';
 
 // Guarda todo el estado de la entrega (retiro o envío) y el cálculo del costo.
 // "inicial" sirve para arrancar con lo que ya se eligió en otra pantalla.
-export function useEntrega(inicial = {}) {
+export function useEntrega(inicial = {}, tarifaBase = 0) {
   const [conEnvio, setConEnvio] = useState(inicial.conEnvio || false);
   const [direccion, setDireccion] = useState(inicial.direccion || '');
   const [localidad, setLocalidad] = useState(inicial.localidad || '');
@@ -27,7 +27,7 @@ export function useEntrega(inicial = {}) {
     setEnvio(null);
     try {
       const resultado = await calcularEnvio(direccion.trim(), localidad.trim());
-      setEnvio(resultado);
+      setEnvio({ ...resultado, costo: Number(resultado.costo || 0) + Math.max(0, Number(tarifaBase || 0)) });
     } catch (e) {
       setErrorEnvio(e.message || 'No pudimos calcular el envío. Probá de nuevo.');
     } finally {
@@ -59,7 +59,7 @@ export function useEntrega(inicial = {}) {
   };
 }
 
-export default function EntregaEnvio({ entrega }) {
+export default function EntregaEnvio({ entrega, envioHabilitado = true, tarifaBase = 0 }) {
   const {
     conEnvio,
     setConEnvio,
@@ -84,12 +84,14 @@ export default function EntregaEnvio({ entrega }) {
         >
           <Text style={[styles.opcionTexto, !conEnvio && styles.opcionTextoActivo]}>Retiro en el local</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.opcion, conEnvio && styles.opcionActiva]}
-          onPress={() => setConEnvio(true)}
-        >
-          <Text style={[styles.opcionTexto, conEnvio && styles.opcionTextoActivo]}>Envío a domicilio</Text>
-        </TouchableOpacity>
+        {envioHabilitado && (
+          <TouchableOpacity
+            style={[styles.opcion, conEnvio && styles.opcionActiva]}
+            onPress={() => setConEnvio(true)}
+          >
+            <Text style={[styles.opcionTexto, conEnvio && styles.opcionTextoActivo]}>Envío a domicilio</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {conEnvio && (
@@ -137,7 +139,7 @@ export default function EntregaEnvio({ entrega }) {
             </View>
           )}
 
-          <Text style={styles.nota}>Envío gratis hasta {UMBRAL_GRATIS_KM} km. Datos © OpenStreetMap.</Text>
+          <Text style={styles.nota}>Envío gratis hasta {UMBRAL_GRATIS_KM} km según distancia, más tarifa base de ${Number(tarifaBase || 0)}. Datos © OpenStreetMap.</Text>
         </View>
       )}
     </View>

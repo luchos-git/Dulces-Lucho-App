@@ -1,0 +1,423 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Dulces Lucho - Cuenta principal, permisos e inventario",
+    "version": "1.0.0",
+    "description": "Endpoints administrativos. Usar Authorization: Bearer <sessionToken>. Solo la cuenta principal puede delegar permisos y dar de baja empleados."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000/api"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "PermisosEmpleado": {
+        "type": "object",
+        "required": [
+          "permisos"
+        ],
+        "properties": {
+          "permisos": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "gestionar_productos",
+                "gestionar_pedidos",
+                "ver_reportes",
+                "gestionar_usuarios",
+                "gestionar_empleados",
+                "gestionar_banners",
+                "configurar_tienda",
+                "gestionar_insumos",
+                "solicitar_compras"
+              ]
+            }
+          }
+        }
+      },
+      "NuevaMateriaPrima": {
+        "type": "object",
+        "required": [
+          "adminId",
+          "nombre",
+          "unidad"
+        ],
+        "properties": {
+          "adminId": {
+            "type": "integer"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "unidad": {
+            "type": "string"
+          },
+          "stockActual": {
+            "type": "number",
+            "minimum": 0
+          },
+          "stockMinimo": {
+            "type": "number",
+            "minimum": 0
+          },
+          "proveedor": {
+            "type": "string"
+          }
+        }
+      },
+      "SolicitudCompra": {
+        "type": "object",
+        "required": [
+          "adminId",
+          "proveedor",
+          "items"
+        ],
+        "properties": {
+          "adminId": {
+            "type": "integer"
+          },
+          "proveedor": {
+            "type": "string"
+          },
+          "notas": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "insumoId",
+                "cantidad"
+              ],
+              "properties": {
+                "insumoId": {
+                  "type": "integer"
+                },
+                "cantidad": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
+  "paths": {
+    "/owner/empleados": {
+      "get": {
+        "summary": "Listar empleados administradores",
+        "description": "Solo cuenta principal. Devuelve permisos y estado de los empleados.",
+        "responses": {
+          "200": {
+            "description": "Lista de empleados"
+          },
+          "403": {
+            "description": "No es la cuenta principal"
+          }
+        }
+      }
+    },
+    "/owner/empleados/{id}/permisos": {
+      "put": {
+        "summary": "Asignar permisos a un empleado",
+        "description": "Solo la cuenta principal. El ID debe pertenecer a una cuenta activa con rol admin.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermisosEmpleado"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Permisos guardados"
+          },
+          "403": {
+            "description": "No es la cuenta principal"
+          }
+        }
+      }
+    },
+    "/owner/usuarios/{id}": {
+      "delete": {
+        "summary": "Dar de baja un usuario",
+        "description": "Solo la cuenta principal. Baja lógica: conserva pedidos y comprobantes.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cuenta deshabilitada"
+          },
+          "403": {
+            "description": "No es la cuenta principal"
+          }
+        }
+      }
+    },
+    "/admin/insumos": {
+      "get": {
+        "summary": "Consultar inventario, recetas y solicitudes",
+        "description": "Requiere gestionar_insumos o solicitar_compras. adminId debe coincidir con el usuario autenticado.",
+        "parameters": [
+          {
+            "name": "adminId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Inventario y compras"
+          },
+          "403": {
+            "description": "Permiso insuficiente"
+          }
+        }
+      },
+      "post": {
+        "summary": "Registrar una materia prima",
+        "description": "Requiere gestionar_insumos.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NuevaMateriaPrima"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Insumo creado"
+          },
+          "403": {
+            "description": "Permiso insuficiente"
+          }
+        }
+      }
+    },
+    "/admin/insumos/recetas": {
+      "post": {
+        "summary": "Definir cantidad de insumo por producto",
+        "description": "Requiere gestionar_insumos.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "adminId",
+                  "productoId",
+                  "insumoId",
+                  "cantidadPorProducto"
+                ],
+                "properties": {
+                  "adminId": {
+                    "type": "integer"
+                  },
+                  "productoId": {
+                    "type": "integer"
+                  },
+                  "insumoId": {
+                    "type": "integer"
+                  },
+                  "cantidadPorProducto": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Receta guardada"
+          },
+          "403": {
+            "description": "Permiso insuficiente"
+          }
+        }
+      }
+    },
+    "/admin/compras-insumos": {
+      "post": {
+        "summary": "Solicitar una compra grande a proveedor",
+        "description": "Registra una solicitud en MySQL. No envía automáticamente una orden al proveedor. Requiere solicitar_compras.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SolicitudCompra"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Solicitud registrada"
+          },
+          "403": {
+            "description": "Permiso insuficiente"
+          }
+        }
+      }
+    },
+    "/admin/compras-insumos/{id}/estado": {
+      "patch": {
+        "summary": "Marcar compra recibida o cancelada",
+        "description": "Al recibirla, actualiza el stock una sola vez. Requiere solicitar_compras.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "adminId",
+                  "estado"
+                ],
+                "properties": {
+                  "adminId": {
+                    "type": "integer"
+                  },
+                  "estado": {
+                    "type": "string",
+                    "enum": [
+                      "recibido",
+                      "cancelado"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Estado actualizado"
+          },
+          "409": {
+            "description": "La compra ya fue recibida o cancelada"
+          }
+        }
+      }
+    },
+    "/estado": {
+      "get": {
+        "security": [],
+        "summary": "Verificar conexión y tablas requeridas",
+        "responses": {
+          "200": {
+            "description": "Backend y base de datos conectados"
+          },
+          "503": {
+            "description": "Falta una tabla o columna"
+          }
+        }
+      }
+    },
+    "/usuarios/{id}/foto-perfil": {
+      "post": {
+        "summary": "Subir y guardar la foto de perfil del usuario autenticado",
+        "description": "Requiere Bearer de la misma cuenta indicada en {id}. Envía la imagen en base64 sin prefijo data URI. El backend sube a ImgBB y guarda usuarios.foto_perfil_url en una sola operación.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "image"
+                ],
+                "properties": {
+                  "image": {
+                    "type": "string",
+                    "description": "Cadena base64 de una imagen JPG o PNG; máximo 5 MB."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Foto subida a ImgBB y URL guardada en la cuenta"
+          },
+          "400": {
+            "description": "No se recibió una imagen válida"
+          },
+          "401": {
+            "description": "El Bearer no corresponde al usuario"
+          },
+          "502": {
+            "description": "ImgBB rechazó o no pudo recibir la imagen"
+          }
+        }
+      }
+    }
+  }
+}

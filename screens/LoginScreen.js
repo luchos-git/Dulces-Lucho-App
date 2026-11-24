@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Image } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import CampoPassword from '../components/CampoPassword';
 
 export default function LoginScreen({ navigation }) {
   // toma la función del contexto y guarda los datos escritos en el formulario
@@ -54,10 +55,9 @@ export default function LoginScreen({ navigation }) {
           setError('');
         }}
       />
-      <TextInput
+      <CampoPassword
         style={styles.input}
         placeholder="Contraseña"
-        secureTextEntry
         autoCapitalize="none"
         value={password}
         onChangeText={(texto) => {

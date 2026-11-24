@@ -1,0 +1,113 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Dulces Lucho - Configuraciones",
+    "version": "1.0.0",
+    "description": "Solicitudes para probar preferencias del usuario, seguridad, administración, pedidos, reportes y configuración de tienda. Reemplazar userId/adminId por IDs existentes en MySQL."
+  },
+  "servers": [{ "url": "http://localhost:3000/api" }],
+  "tags": [
+    { "name": "Configuración pública" },
+    { "name": "Preferencias de usuario" },
+    { "name": "Administración" },
+    { "name": "Pedidos" }
+  ],
+  "paths": {
+    "/configuracion-tienda": {
+      "get": {
+        "tags": ["Configuración pública"],
+        "summary": "Consultar datos de la tienda y métodos habilitados",
+        "responses": { "200": { "description": "Configuración pública de la tienda" } }
+      }
+    },
+    "/usuarios/{userId}/preferencias": {
+      "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "integer", "example": 1 } }],
+      "get": {
+        "tags": ["Preferencias de usuario"],
+        "summary": "Consultar dirección, método de pago y notificaciones",
+        "responses": { "200": { "description": "Preferencias guardadas" } }
+      },
+      "put": {
+        "tags": ["Preferencias de usuario"],
+        "summary": "Guardar preferencias del usuario",
+        "requestBody": { "required": true, "content": { "application/json": { "example": { "direccion": "Av. Mitre 200", "localidad": "Avellaneda", "metodoPagoPreferido": "rapipago", "notificacionesActivas": true } } } },
+        "responses": { "200": { "description": "Preferencias guardadas" }, "400": { "description": "Datos inválidos o método deshabilitado" } }
+      }
+    },
+    "/usuarios/{userId}/password": {
+      "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "integer", "example": 1 } }],
+      "post": {
+        "tags": ["Preferencias de usuario"],
+        "summary": "Cambiar contraseña",
+        "requestBody": { "required": true, "content": { "application/json": { "example": { "passwordActual": "claveActual", "passwordNueva": "nuevaClave123" } } } },
+        "responses": { "200": { "description": "Contraseña actualizada" }, "401": { "description": "Contraseña actual incorrecta" } }
+      }
+    },
+    "/admin/usuarios": {
+      "get": {
+        "tags": ["Administración"],
+        "summary": "Listar usuarios (solo administrador)",
+        "parameters": [{ "name": "adminId", "in": "query", "required": true, "schema": { "type": "integer", "example": 2 } }],
+        "responses": { "200": { "description": "Listado de usuarios" }, "403": { "description": "No es administrador" } }
+      }
+    },
+    "/admin/usuarios/{userId}/estado": {
+      "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "integer", "example": 1 } }],
+      "patch": {
+        "tags": ["Administración"],
+        "summary": "Habilitar o deshabilitar una cuenta",
+        "requestBody": { "required": true, "content": { "application/json": { "example": { "adminId": 2, "activo": false } } } },
+        "responses": { "200": { "description": "Estado actualizado" }, "403": { "description": "No es administrador" } }
+      }
+    },
+    "/admin/configuracion-tienda": {
+      "put": {
+        "tags": ["Administración"],
+        "summary": "Guardar datos, envíos y métodos de pago de la tienda",
+        "requestBody": { "required": true, "content": { "application/json": { "example": { "adminId": 2, "nombre": "Dulces Lucho", "telefono": "11 5555 5555", "email": "contacto@dulceslucho.com", "direccion": "Av. Mitre 200", "localidad": "Avellaneda", "descripcion": "Venta de golosinas", "horario": "Lunes a viernes de 9 a 18", "condicionesVenta": "Los pedidos se preparan luego de confirmarse.", "envioHabilitado": true, "costoEnvioBase": 200, "metodosPago": { "credito": true, "debito": true, "rapipago": true } } } } },
+        "responses": { "200": { "description": "Configuración guardada" }, "403": { "description": "No es administrador" } }
+      }
+    },
+    "/admin/ventas": {
+      "get": {
+        "tags": ["Administración", "Pedidos"],
+        "summary": "Listar pedidos y ventas para administración",
+        "parameters": [{ "name": "adminId", "in": "query", "required": true, "schema": { "type": "integer", "example": 2 } }],
+        "responses": { "200": { "description": "Listado de ventas con detalle" } }
+      }
+    },
+    "/admin/ventas/{saleId}/estado": {
+      "parameters": [{ "name": "saleId", "in": "path", "required": true, "schema": { "type": "integer", "example": 1 } }],
+      "patch": {
+        "tags": ["Administración", "Pedidos"],
+        "summary": "Actualizar el estado logístico de un pedido",
+        "requestBody": { "required": true, "content": { "application/json": { "example": { "adminId": 2, "estadoPedido": "preparando" } } } },
+        "responses": { "200": { "description": "Estado actualizado" }, "400": { "description": "Estado inválido" }, "403": { "description": "No es administrador" } }
+      }
+    },
+    "/admin/reportes": {
+      "get": {
+        "tags": ["Administración"],
+        "summary": "Consultar indicadores y productos más vendidos",
+        "parameters": [{ "name": "adminId", "in": "query", "required": true, "schema": { "type": "integer", "example": 2 } }],
+        "responses": { "200": { "description": "Resumen de ventas, pedidos y productos" } }
+      }
+    },
+    "/usuarios/{userId}/pedidos": {
+      "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "integer", "example": 1 } }],
+      "get": {
+        "tags": ["Pedidos"],
+        "summary": "Consultar el historial de pedidos del usuario",
+        "responses": { "200": { "description": "Historial con detalle de productos" } }
+      }
+    },
+    "/ventas": {
+      "post": {
+        "tags": ["Pedidos"],
+        "summary": "Registrar una compra en ventas y detalle_ventas",
+        "requestBody": { "required": true, "content": { "application/json": { "example": { "usuarioId": 1, "items": [{ "id": 1, "cantidad": 2 }, { "id": 3, "cantidad": 1 }], "metodoPago": "rapipago", "codigoCupon": "DULCE10", "codigoRapipago": "1234 5678 9012", "conEnvio": false, "direccion": "", "localidad": "", "distanciaKm": null, "costoEnvio": 0 } } } },
+        "responses": { "201": { "description": "Compra registrada" }, "400": { "description": "Datos inválidos o producto no disponible" } }
+      }
+    }
+  }
+}

@@ -1,8 +1,28 @@
 // explicación del archivo: muestra el catálogo de productos y permite filtrarlo por categoría y rango de precios
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from 'react-native';
 import { useProductos } from '../context/ProductosContext';
+import { api } from '../services/api';
 import SliderImagenes from '../components/SliderImagenes';
+import SliderBanners from '../components/SliderBanners';
+
+// Recupera las fotos de los distintos formatos que pudieron quedar guardados en la base anterior.
+function obtenerImagenesProducto(producto) {
+  let lista = producto?.imagenes ?? producto?.imagenesJson ?? producto?.imagenes_json ?? producto?.galeria ?? [];
+  for (let intento = 0; intento < 2 && typeof lista === 'string' && lista.trim(); intento += 1) {
+    try { lista = JSON.parse(lista); }
+    catch { lista = /^https?:\/\//i.test(lista.trim()) ? [lista.trim()] : []; break; }
+  }
+  if (!Array.isArray(lista)) lista = lista ? [lista] : [];
+  const urls = lista.map((item) => {
+    if (typeof item === 'string') return item;
+    return item?.url || item?.imagenUrl || item?.imageUrl || item?.src || item?.displayUrl || item?.display_url || item?.data?.url || item?.data?.display_url || '';
+  });
+  const principal = producto?.miniaturaUrl || producto?.miniatura_url || producto?.imagenUrl || producto?.imagen_url || producto?.portada || producto?.imagen || '';
+  const validas = [...new Set(urls.map((url) => String(url || '').trim()).filter((url) => /^https?:\/\//i.test(url)))];
+  if (!validas.length && principal && /^https?:\/\//i.test(principal)) validas.push(principal);
+  return validas.slice(0, 3);
+}
 
 function iconoCategoria(categoria) {
   if (categoria === 'Jugos') return '🧃';
@@ -12,12 +32,34 @@ function iconoCategoria(categoria) {
 
 export default function HomeScreen({ navigation }) {
   // obtiene el catálogo compartido y guarda los valores de los filtros
-  const { productos } = useProductos();
+  const { productos, cargarProductos } = useProductos();
+  const [banners, setBanners] = useState([]);
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('Todas');
   const [precioMin, setPrecioMin] = useState('');
   const [precioMax, setPrecioMax] = useState('');
 
   const irADetalle = (producto) => navigation.navigate('DetalleProducto', { producto });
+
+  useEffect(() => {
+    const cargarPantalla = async () => {
+      // Actualiza también el catálogo al volver al inicio, para no depender de una copia local vieja.
+      try {
+        await cargarProductos();
+      } catch (error) {
+        console.warn('No se pudo actualizar el catálogo:', error.message);
+      }
+      try {
+        const lista = await api('/banners');
+        setBanners(Array.isArray(lista) ? lista : []);
+      } catch (error) {
+        console.warn('No se pudieron cargar los banners del inicio:', error.message);
+        setBanners([]);
+      }
+    };
+    cargarPantalla();
+    const quitarListener = navigation.addListener('focus', cargarPantalla);
+    return quitarListener;
+  }, [navigation]);
 
   // Chequeo del rango antes de filtrar: mín no puede ser mayor que máx
   const rangoInvalido =
@@ -43,15 +85,15 @@ export default function HomeScreen({ navigation }) {
 
   // muestra los filtros y los productos agrupados por categoría
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.banner}><Text>Banner de Promo/Evento</Text></View>
+    <ScrollView style={styles.container} contentContainerStyle={styles.contenidoScroll}>
+      <SliderBanners banners={banners} />
 
       <Text style={styles.tituloSeccion}>Ofertas del día</Text>
       <View style={styles.fila}>
         {productos.slice(0, 2).map((prod) => (
           <View key={prod.id} style={styles.card}>
-            <TouchableOpacity activeOpacity={0.85} onPress={() => irADetalle(prod)}>
-              {prod.imagenes?.length || prod.imagenUrl ? <SliderImagenes imagenes={prod.imagenes?.length ? prod.imagenes : [prod.imagenUrl]} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
+            <TouchableOpacity style={styles.contenidoProducto} activeOpacity={0.85} onPress={() => irADetalle(prod)}>
+              {obtenerImagenesProducto(prod).length ? <SliderImagenes imagenes={obtenerImagenesProducto(prod)} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
               <Text numberOfLines={1}>{prod.nombre}</Text>
             </TouchableOpacity>
             <View pointerEvents="none" style={styles.precioNoInteractivo}>
@@ -111,8 +153,8 @@ export default function HomeScreen({ navigation }) {
           <View style={styles.grid}>
             {categoriasAgrupadas[nombreCategoria].map((prod) => (
               <View key={prod.id} style={styles.cardGrid}>
-                <TouchableOpacity activeOpacity={0.85} onPress={() => irADetalle(prod)}>
-                  {prod.imagenes?.length || prod.imagenUrl ? <SliderImagenes imagenes={prod.imagenes?.length ? prod.imagenes : [prod.imagenUrl]} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
+                <TouchableOpacity style={styles.contenidoProducto} activeOpacity={0.85} onPress={() => irADetalle(prod)}>
+                  {obtenerImagenesProducto(prod).length ? <SliderImagenes imagenes={obtenerImagenesProducto(prod)} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
                   <Text style={styles.nombreProd} numberOfLines={2}>{prod.nombre}</Text>
                 </TouchableOpacity>
                 <View pointerEvents="none" style={styles.precioNoInteractivo}>
@@ -130,10 +172,11 @@ export default function HomeScreen({ navigation }) {
 // estilos del catálogo, filtros y tarjetas de productos
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF8E1' },
-  banner: { height: 150, backgroundColor: '#ddd', margin: 10, justifyContent: 'center', alignItems: 'center' },
+  contenidoScroll: { paddingBottom: 120 },
   tituloSeccion: { fontSize: 18, fontWeight: 'bold', marginLeft: 10, marginTop: 14, marginBottom: 4 },
   fila: { flexDirection: 'row', justifyContent: 'space-around', marginVertical: 10 },
   card: { width: 150, backgroundColor: '#fff', padding: 10, alignItems: 'center', borderRadius: 10 },
+  contenidoProducto: { width: '100%', alignItems: 'center' },
 
   filaCategorias: { paddingLeft: 10, marginBottom: 10 },
   chip: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ffcc80', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8 },

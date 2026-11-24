@@ -1,0 +1,19 @@
+DULCES LUCHO - PARCHE CUENTA PRINCIPAL
+
+Este ZIP contiene solo los archivos modificados o necesarios para la cuenta principal,
+los permisos delegables, inventario de insumos, compras grandes, foto de perfil,
+cambio de Gmail/contraseña y espaciado inferior de Inicio.
+
+Extraer en la carpeta raíz del proyecto (la que contiene App.js) y combinar/reemplazar.
+No incluye .env, backend/.env, node_modules, .git ni credenciales.
+
+IMPORTANTE PARA MYSQL:
+Antes de iniciar el backend con la nueva lógica de cuenta principal, abrir
+ database/migracion_propietario_permisos_insumos.sql
+reemplazar REEMPLAZAR_POR_EL_GMAIL_DE_LA_CUENTA_PRINCIPAL por el Gmail de una cuenta
+existente con rol admin y activo=1, y ejecutar el archivo en phpMyAdmin dentro de
+dulces_lucho. Consultar el README completo antes de hacerlo. Si la tabla propietario_sistema
+tiene ya una fila asignada, no volver a asignar otra cuenta sin verificar primero.
+
+Después reiniciar backend y Expo. Al reiniciar el backend, las sesiones en memoria se
+pierden; cerrar sesión e ingresar nuevamente.

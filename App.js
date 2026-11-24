@@ -24,13 +24,25 @@ import HistorialPedidosScreen from './screens/HistorialPedidosScreen';
 import PanelAdminScreen from './screens/PanelAdminScreen';
 import PerfilScreen from './screens/PerfilScreen';
 import ConfiguracionScreen from './screens/ConfiguracionScreen';
+import BannersAdminScreen from './screens/BannersAdminScreen';
+import ConfiguracionCuentaScreen from './screens/ConfiguracionCuentaScreen';
+import ProteccionCuentaScreen from './screens/ProteccionCuentaScreen';
+import CambiarCredencialesScreen from './screens/CambiarCredencialesScreen';
+import AdminUsuariosScreen from './screens/AdminUsuariosScreen';
+import AdminVentasScreen from './screens/AdminVentasScreen';
+import AdminReportesScreen from './screens/AdminReportesScreen';
+import AdminTiendaScreen from './screens/AdminTiendaScreen';
+import AdminPermisosScreen from './screens/AdminPermisosScreen';
+import AdminInsumosScreen from './screens/AdminInsumosScreen';
+import DatosTiendaScreen from './screens/DatosTiendaScreen';
+import AyudaScreen from './screens/AyudaScreen';
 import FacturasScreen from './screens/FacturasScreen';
 import DrawerMenu from './navigation/DrawerMenu';
 
 const Stack = createNativeStackNavigator();
 
 function Navegacion() {
-  const { usuario, esAdmin, cerrarSesion } = useAuth();
+  const { usuario, esAdmin, esPropietario, puede, cerrarSesion } = useAuth();
   const { vaciarCarrito } = useCarrito();
   const { pedidoActual, limpiarPedido } = usePedido();
   const [menuVisible, setMenuVisible] = React.useState(false);
@@ -99,6 +111,18 @@ function Navegacion() {
             <Stack.Screen name="PanelAdmin" component={PanelAdminScreen} options={{ title: 'Panel de administración' }} />
             <Stack.Screen name="Perfil" component={PerfilScreen} options={{ title: 'Mi perfil' }} />
             <Stack.Screen name="Configuracion" component={ConfiguracionScreen} options={{ title: 'Configuración' }} />
+            <Stack.Screen name="BannersAdmin" component={BannersAdminScreen} options={{ title: 'Banners del inicio' }} />
+            <Stack.Screen name="ProteccionCuenta" component={ProteccionCuentaScreen} options={{ title: 'Protección de cuenta' }} />
+            <Stack.Screen name="CambiarCredenciales" component={CambiarCredencialesScreen} options={({ route }) => ({ title: route.params?.tipoCambio === 'email' ? 'Cambiar Gmail' : route.params?.tipoCambio === 'password' ? 'Cambiar contraseña' : 'Cambiar datos de acceso' })} />
+            <Stack.Screen name="ConfiguracionCuenta" component={ConfiguracionCuentaScreen} options={({ route }) => ({ title: ({ pago: 'Métodos de pago', direccion: 'Dirección de entrega', notificaciones: 'Notificaciones', seguridad: 'Privacidad y seguridad' }[route.params?.seccion] || 'Mi configuración') })} />
+            <Stack.Screen name="AdminUsuarios" component={AdminUsuariosScreen} options={{ title: 'Gestión de usuarios' }} />
+            <Stack.Screen name="AdminVentas" component={AdminVentasScreen} options={{ title: 'Pedidos y ventas' }} />
+            <Stack.Screen name="AdminReportes" component={AdminReportesScreen} options={{ title: 'Reportes y estadísticas' }} />
+            <Stack.Screen name="AdminTienda" component={AdminTiendaScreen} options={{ title: 'Configuración de la tienda' }} />
+            <Stack.Screen name="AdminPermisos" component={AdminPermisosScreen} options={{ title: 'Permisos de empleados' }} />
+            <Stack.Screen name="AdminInsumos" component={AdminInsumosScreen} options={{ title: 'Inventario y compras grandes' }} />
+            <Stack.Screen name="DatosTienda" component={DatosTiendaScreen} options={{ title: 'Acerca de Dulces Lucho' }} />
+            <Stack.Screen name="Ayuda" component={AyudaScreen} options={{ title: 'Ayuda y soporte' }} />
             <Stack.Screen name="Facturas" component={FacturasScreen} options={{ title: 'Facturas y comprobantes' }} />
           </Stack.Group>
         )}
@@ -114,6 +138,8 @@ function Navegacion() {
           }}
           usuario={usuario}
           esAdmin={esAdmin}
+          esPropietario={esPropietario}
+          puede={puede}
           hayPedido={pedidoActual != null}
           onLogout={salir}
         />

@@ -1,50 +1,74 @@
-// explicación del archivo: separa los pedidos que todavía están en camino de los pedidos que ya fueron entregados
-import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity } from 'react-native';
+// Historial de pedidos sincronizado con MySQL y filtrado por el ID de la cuenta activa.
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { usePedido } from '../context/PedidoContext';
+import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
+
+const ETIQUETAS = { confirmado: 'Confirmado', preparando: 'Preparando', en_camino: 'En camino', listo_para_retirar: 'Listo para retirar', entregado: 'Entregado', cancelado: 'Cancelado' };
 
 export default function HistorialPedidosScreen({ navigation }) {
-  const { pedidos } = usePedido();
+  const { pedidos, sincronizarPedidos } = usePedido();
+  const { usuario } = useAuth();
+  const [cargando, setCargando] = useState(true);
+  const [actualizando, setActualizando] = useState(false);
 
-  // separa el historial en pedidos activos y pedidos que ya finalizaron
-  const activos = pedidos.filter((pedido) => pedido.estado !== 'entregado');
-  const historial = pedidos.filter((pedido) => pedido.estado === 'entregado');
+  const cargar = useCallback(async () => {
+    if (!usuario?.id) { setCargando(false); return; }
+    try {
+      const remotos = await api(`/usuarios/${usuario.id}/pedidos`);
+      sincronizarPedidos(remotos);
+    } catch (error) {
+      Alert.alert('No se pudo actualizar el historial', error.message);
+    } finally {
+      setCargando(false);
+      setActualizando(false);
+    }
+  }, [usuario?.id, sincronizarPedidos]);
 
-  // arma una sección reutilizable para no repetir el diseño de cada lista
+  useEffect(() => { setCargando(true); cargar(); }, [cargar]);
+
+  const pedidosUsuario = pedidos.filter((pedido) =>
+    String(pedido.usuarioId ?? pedido.usuario_id ?? '') === String(usuario?.id ?? '')
+  );
+  const activos = pedidosUsuario.filter((p) => !['entregado', 'cancelado'].includes(p.estadoPedido || p.estado));
+  const historial = pedidosUsuario.filter((p) => ['entregado', 'cancelado'].includes(p.estadoPedido || p.estado));
+
   const lista = (titulo, elementos) => (
     <>
       <Text style={styles.tituloSeccion}>{titulo}</Text>
       {elementos.length ? elementos.map((pedido) => (
-        <TouchableOpacity
-          key={pedido.id}
-          style={styles.tarjeta}
-          onPress={() => navigation.navigate('Seguimiento', { pedidoId: pedido.id })}
-        >
-          <Text style={styles.numero}>Pedido #{pedido.numero}</Text>
-          <Text>{pedido.estado === 'entregado' ? 'Entregado' : 'En camino'} · ${pedido.total}</Text>
-          <Text style={styles.detalle}>
-            {pedido.items.map((item) => `${item.cantidad} x ${item.nombre}`).join(', ')}
-          </Text>
+        <TouchableOpacity key={`${usuario?.id}-${pedido.id}`} style={styles.tarjeta} onPress={() => navigation.navigate('Seguimiento', { pedidoId: pedido.id })}>
+          <Text style={styles.numero}>Pedido #{pedido.numero || pedido.id}</Text>
+          <Text style={styles.identificador}>ID de pedido: #{pedido.pedidoId || pedido.id} · Cuenta: #{usuario?.id}</Text>
+          <Text>{ETIQUETAS[pedido.estadoPedido || pedido.estado] || pedido.estadoPedido || pedido.estado} · ${Number(pedido.total || 0).toFixed(2)}</Text>
+          <Text style={styles.detalle}>{(pedido.items || []).map((item) => `${item.cantidad} x ${item.nombre}`).join(', ')}</Text>
         </TouchableOpacity>
-      )) : <Text style={styles.vacio}>Todavía no hay pedidos.</Text>}
+      )) : <Text style={styles.vacio}>Todavía no hay pedidos en esta sección.</Text>}
     </>
   );
 
-  // muestra primero los pedidos activos y después los que ya se entregaron
   return (
-    <ScrollView style={styles.contenedor}>
-      {lista('Pedidos en camino', activos)}
+    <ScrollView style={styles.contenedor} contentContainerStyle={styles.contenido} refreshControl={<RefreshControl refreshing={actualizando} onRefresh={() => { setActualizando(true); cargar(); }} />}>
+      <Text style={styles.titulo}>Mis pedidos</Text>
+      <Text style={styles.identificacion}>Pedidos pertenecientes a la cuenta #{usuario?.id ?? '—'}</Text>
+      {cargando && <View style={styles.cargando}><ActivityIndicator color="#A86616" /><Text style={styles.vacio}>Actualizando desde MySQL...</Text></View>}
+      {lista('Pedidos en curso', activos)}
       {lista('Historial de pedidos', historial)}
     </ScrollView>
   );
 }
 
-// estilos de las secciones y de cada tarjeta del historial
 const styles = StyleSheet.create({
-  contenedor: { flex: 1, backgroundColor: '#FFF8E1', padding: 10 },
-  tituloSeccion: { fontSize: 18, fontWeight: 'bold', marginTop: 8, marginBottom: 6 },
+  contenedor: { flex: 1, backgroundColor: '#FFF8E1' },
+  contenido: { padding: 12, paddingBottom: 30 },
+  titulo: { fontSize: 22, color: '#35230E', fontWeight: 'bold' },
+  identificacion: { color: '#89530D', backgroundColor: '#FFF0D8', padding: 8, borderRadius: 8, alignSelf: 'flex-start', marginTop: 8 },
+  tituloSeccion: { fontSize: 17, fontWeight: 'bold', marginTop: 14, marginBottom: 7, color: '#80500F' },
   tarjeta: { backgroundColor: '#fff', borderRadius: 10, padding: 12, marginBottom: 8 },
-  numero: { fontWeight: 'bold' },
-  detalle: { color: '#777', marginTop: 4 },
-  vacio: { color: '#777', marginBottom: 12 },
+  numero: { fontWeight: 'bold', color: '#35230E' },
+  detalle: { color: '#777', marginTop: 4, fontSize: 12 },
+  identificador: { color: '#806B4E', marginTop: 3, marginBottom: 4, fontSize: 11 },
+  vacio: { color: '#777', marginBottom: 12, marginTop: 5 },
+  cargando: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 });

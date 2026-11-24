@@ -1,0 +1,97 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Dulces Lucho - Protección de cuenta",
+    "version": "1.0.0",
+    "description": "Verificación reforzada y actualización de Gmail/contraseña. La foto de perfil se recomienda probar desde la app."
+  },
+  "servers": [
+    { "url": "http://localhost:3000/api", "description": "Backend local" }
+  ],
+  "paths": {
+    "/auth/verificar-proteccion-cuenta": {
+      "post": {
+        "summary": "Verificar identidad para cambios de credenciales",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["usuarioId", "passwordActual"],
+                "properties": {
+                  "usuarioId": { "type": "integer", "example": 4 },
+                  "passwordActual": { "type": "string", "format": "password" },
+                  "codigoAdmin": { "type": "string", "description": "Obligatorio para admin: valor de ADMIN_REGISTRATION_CODE." },
+                  "claveUnica": { "type": "string", "minLength": 6, "maxLength": 6, "description": "Obligatorio para admin: clave personal de seis números." }
+                }
+              },
+              "example": { "usuarioId": 4, "passwordActual": "CONTRASEÑA_ACTUAL" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Identidad verificada; devuelve un token temporal de un solo uso." },
+          "401": { "description": "Datos de protección incorrectos." },
+          "429": { "description": "Demasiados intentos." }
+        }
+      }
+    },
+    "/usuarios/{id}/credenciales": {
+      "put": {
+        "summary": "Cambiar Gmail, contraseña o ambos",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "X-Proteccion-Cuenta", "in": "header", "required": true, "schema": { "type": "string" }, "description": "Token devuelto por la verificación; se consume al guardar." }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "nuevoEmail": { "type": "string", "format": "email", "example": "nuevo.correo@gmail.com" },
+                  "nuevaPassword": { "type": "string", "minLength": 6, "maxLength": 100 }
+                },
+                "description": "Enviar al menos uno de los dos campos. Usar cadena vacía para el dato que no se cambia."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Credenciales actualizadas." },
+          "401": { "description": "Token inválido, vencido o ya utilizado." },
+          "409": { "description": "El correo ya está en uso." }
+        }
+      }
+    },
+    "/usuarios/{id}/foto-perfil": {
+      "post": {
+        "summary": "Subir y guardar foto de perfil en ImgBB",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["image"],
+                "properties": { "image": { "type": "string", "description": "Contenido base64 de JPG/PNG/GIF/WEBP/BMP, sin necesidad de prefijo data URL." } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Imagen subida a ImgBB y URL guardada en el perfil." },
+          "400": { "description": "No llegó una imagen válida." },
+          "413": { "description": "La imagen supera los 5 MB." },
+          "502": { "description": "ImgBB rechazó la imagen o no respondió." },
+          "503": { "description": "Falta la clave de ImgBB en backend/.env." }
+        }
+      }
+    }
+  }
+}

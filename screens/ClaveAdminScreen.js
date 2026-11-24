@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import CampoPassword from '../components/CampoPassword';
 
 // cantidad máxima de claves incorrectas antes de volver al inicio de sesión
 const MAX_INTENTOS = 3;
@@ -54,11 +55,10 @@ export default function ClaveAdminScreen({ navigation }) {
         Hola{adminPendiente ? `, ${adminPendiente.nombre}` : ''}. Ingresá tu clave única de 6 números para continuar.
       </Text>
 
-      <TextInput
+      <CampoPassword
         style={styles.input}
         placeholder="Clave única"
         keyboardType="number-pad"
-        secureTextEntry
         maxLength={6}
         value={clave}
         onChangeText={(texto) => {

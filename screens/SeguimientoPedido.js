@@ -1,16 +1,73 @@
-// explicación del archivo: muestra el avance, los pasos y el resumen del pedido seleccionado
-import React, { useState, useEffect } from 'react';
+// Muestra el avance real de los pedidos guardados en MySQL.
+// Los pedidos locales antiguos conservan el seguimiento simulado para no perder compatibilidad.
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { usePedido } from '../context/PedidoContext';
+import { useAuth } from '../context/AuthContext';
 import { pasosDe, indicePaso } from '../data/seguimiento';
-import { cancelarAvisos } from '../services/notificaciones';
+import { cancelarAvisos, notificarEstadoPedido } from '../services/notificaciones';
+import { api } from '../services/api';
+
+const INDICES_ESTADO = {
+  confirmado: 0,
+  preparando: 1,
+  en_camino: 2,
+  listo_para_retirar: 2,
+  entregado: 'final',
+  cancelado: 'cancelado',
+};
 
 export default function SeguimientoPedido({ navigation, route }) {
-  const { pedidoActual, pedidos, limpiarPedido } = usePedido();
-  const pedidoSeleccionado = route.params?.pedidoId ? pedidos.find((p) => p.id === route.params.pedidoId) : pedidoActual;
+  const { pedidoActual, pedidos, limpiarPedido, sincronizarPedidos } = usePedido();
+  const { usuario } = useAuth();
+  const sincronizarRef = useRef(sincronizarPedidos);
+  const ultimoEstadoRef = useRef(null);
+  sincronizarRef.current = sincronizarPedidos;
+  const pedidoId = route.params?.pedidoId;
+  const idPedidoActual = pedidoId != null ? pedidoId : pedidoActual?.id;
+  const pedidoSeleccionado = idPedidoActual != null
+    ? pedidos.find((p) => String(p.id) === String(idPedidoActual))
+    : pedidoActual;
   const [ahora, setAhora] = useState(Date.now());
 
-  // Reloj que actualiza la pantalla cada segundo
+  useEffect(() => { ultimoEstadoRef.current = null; }, [pedidoId]);
+
+  // Actualiza el estado desde MySQL al abrir el seguimiento y cada 20 segundos.
+  useFocusEffect(React.useCallback(() => {
+    let vigente = true;
+    let consultando = false;
+    const cargarEstado = async () => {
+      if (!usuario?.id || consultando) return;
+      consultando = true;
+      try {
+        const remotos = await api(`/usuarios/${usuario.id}/pedidos`);
+        if (!vigente) return;
+        const pedidoRemoto = idPedidoActual != null
+          ? remotos.find((p) => String(p.id) === String(idPedidoActual))
+          : remotos.find((p) => !['entregado', 'cancelado'].includes(p.estadoPedido));
+        const estadoNuevo = pedidoRemoto?.estadoPedido;
+        const estadoAnterior = ultimoEstadoRef.current;
+        if (estadoNuevo && estadoAnterior && estadoNuevo !== estadoAnterior && pedidoRemoto.notificacionesActivas) {
+          await notificarEstadoPedido(pedidoRemoto.numero || pedidoRemoto.id, estadoNuevo);
+        }
+        if (estadoNuevo) ultimoEstadoRef.current = estadoNuevo;
+        sincronizarRef.current(remotos);
+      } catch (error) {
+        console.warn('No se pudo actualizar el seguimiento:', error.message);
+      } finally {
+        consultando = false;
+      }
+    };
+    cargarEstado();
+    const intervalo = setInterval(cargarEstado, 20000);
+    return () => {
+      vigente = false;
+      clearInterval(intervalo);
+    };
+  }, [usuario?.id, idPedidoActual]));
+
+  // El reloj solo se utiliza con pedidos locales antiguos, no con ventas guardadas en MySQL.
   useEffect(() => {
     const reloj = setInterval(() => setAhora(Date.now()), 1000);
     return () => clearInterval(reloj);
@@ -28,22 +85,38 @@ export default function SeguimientoPedido({ navigation, route }) {
   }
 
   const pasos = pasosDe(pedidoSeleccionado);
-  const segundos = (ahora - pedidoSeleccionado.inicio) / 1000;
-  const indice = indicePaso(pasos, segundos);
-  const pasoActual = pasos[indice];
-  const terminado = indice === pasos.length - 1;
-
-  const colorEstado = terminado ? styles.estadoTerminado : pasoActual.destacado ? styles.estadoDestacado : styles.estadoNormal;
+  const estadoGuardado = pedidoSeleccionado.estadoPedido || (
+    String(pedidoSeleccionado.id).startsWith('local-') ? null : pedidoSeleccionado.estado
+  );
+  const indiceGuardado = estadoGuardado ? INDICES_ESTADO[estadoGuardado] : null;
+  const cancelado = indiceGuardado === 'cancelado';
+  const entregado = estadoGuardado === 'entregado';
+  const terminado = indiceGuardado === 'final' || cancelado || (
+    indiceGuardado == null && indicePaso(pasos, (ahora - pedidoSeleccionado.inicio) / 1000) === pasos.length - 1
+  );
+  const indice = cancelado ? 0 : indiceGuardado === 'final'
+    ? pasos.length - 1
+    : typeof indiceGuardado === 'number'
+      ? Math.min(indiceGuardado, pasos.length - 1)
+      : indicePaso(pasos, (ahora - pedidoSeleccionado.inicio) / 1000);
+  const pasoActual = cancelado
+    ? { icono: '🚫', titulo: 'Pedido cancelado', detalle: 'Este pedido fue cancelado por la administración.' }
+    : entregado
+      ? { icono: '✅', titulo: 'Pedido entregado', detalle: 'La administración marcó este pedido como entregado.' }
+      : pasos[indice];
+  const colorEstado = cancelado ? styles.estadoCancelado : terminado ? styles.estadoTerminado : pasoActual.destacado ? styles.estadoDestacado : styles.estadoNormal;
+  const seguimientoSimulado = !estadoGuardado;
 
   const finalizar = () => {
     navigation.popToTop();
-    limpiarPedido(pedidoSeleccionado.id);
+    // Solo se marca localmente como finalizado cuando era un pedido simulado antiguo.
+    // Los pedidos de MySQL conservan el estado que actualizó administración.
+    if (!estadoGuardado) limpiarPedido(pedidoSeleccionado.id);
     cancelarAvisos();
   };
 
   return (
     <ScrollView style={styles.container}>
-      {/* Estado actual */}
       <View style={[styles.estado, colorEstado]}>
         <Text style={styles.estadoIcono}>{pasoActual.icono}</Text>
         <Text style={styles.estadoTitulo}>{pasoActual.titulo}</Text>
@@ -51,55 +124,46 @@ export default function SeguimientoPedido({ navigation, route }) {
         <Text style={styles.estadoPedido}>Pedido #{pedidoSeleccionado.numero}</Text>
       </View>
 
-      {/* Etapas */}
-      <View style={styles.caja}>
-        <Text style={styles.titulo}>Seguimiento</Text>
-        {pasos.map((paso, i) => {
-          const hecho = i < indice || (i === indice && terminado);
-          const actual = i === indice;
-          return (
-            <View key={paso.titulo} style={styles.filaPaso}>
-              <View style={styles.columnaIndicador}>
-                <View style={[styles.circulo, (hecho || actual) && styles.circuloActivo, actual && !terminado && styles.circuloActual]}>
-                  {hecho && <Text style={styles.checkPaso}>✓</Text>}
+      {!cancelado && (
+        <View style={styles.caja}>
+          <Text style={styles.titulo}>Seguimiento</Text>
+          {pasos.map((paso, i) => {
+            const hecho = i < indice || (i === indice && terminado);
+            const actual = i === indice;
+            return (
+              <View key={paso.titulo} style={styles.filaPaso}>
+                <View style={styles.columnaIndicador}>
+                  <View style={[styles.circulo, (hecho || actual) && styles.circuloActivo, actual && !terminado && styles.circuloActual]}>
+                    {hecho && <Text style={styles.checkPaso}>✓</Text>}
+                  </View>
+                  {i < pasos.length - 1 && <View style={[styles.linea, i < indice && styles.lineaActiva]} />}
                 </View>
-                {i < pasos.length - 1 && <View style={[styles.linea, i < indice && styles.lineaActiva]} />}
+                <View style={styles.textoPaso}>
+                  <Text style={[styles.tituloPaso, !(hecho || actual) && styles.tituloPendiente, actual && styles.tituloActual]}>{paso.titulo}</Text>
+                  {actual && <Text style={styles.detallePaso}>{paso.detalle}</Text>}
+                </View>
               </View>
-              <View style={styles.textoPaso}>
-                <Text style={[styles.tituloPaso, !(hecho || actual) && styles.tituloPendiente, actual && styles.tituloActual]}>
-                  {paso.titulo}
-                </Text>
-                {actual && <Text style={styles.detallePaso}>{paso.detalle}</Text>}
-              </View>
-            </View>
-          );
-        })}
-      </View>
+            );
+          })}
+        </View>
+      )}
 
-      {/* Entrega */}
       <View style={styles.caja}>
         <Text style={styles.titulo}>Entrega</Text>
         {pedidoSeleccionado.conEnvio ? (
           <View>
-            <Text>📍 {pedidoSeleccionado.destino || `${pedidoSeleccionado.direccion}, ${pedidoSeleccionado.localidad}`}</Text>
-            {pedidoSeleccionado.distanciaKm !== null && (
-              <Text style={styles.nota}>A {pedidoSeleccionado.distanciaKm.toFixed(1)} km del local</Text>
-            )}
+            <Text>📍 {pedidoSeleccionado.destino || `${pedidoSeleccionado.direccion || ''}, ${pedidoSeleccionado.localidad || ''}`}</Text>
+            {pedidoSeleccionado.distanciaKm != null && <Text style={styles.nota}>A {Number(pedidoSeleccionado.distanciaKm).toFixed(1)} km del local</Text>}
           </View>
-        ) : (
-          <Text>Retiro en el local</Text>
-        )}
+        ) : <Text>Retiro en el local</Text>}
       </View>
 
-      {/* Productos */}
       <View style={styles.caja}>
         <Text style={styles.titulo}>Tu pedido</Text>
-        {pedidoSeleccionado.items.map((item) => (
-          <View key={item.id} style={styles.filaMonto}>
-            <Text style={styles.nombreItem} numberOfLines={1}>
-              {item.cantidad} x {item.nombre}
-            </Text>
-            <Text>${item.precio * item.cantidad}</Text>
+        {(pedidoSeleccionado.items || []).map((item, i) => (
+          <View key={`${item.id}-${i}`} style={styles.filaMonto}>
+            <Text style={styles.nombreItem} numberOfLines={1}>{item.cantidad} x {item.nombre}</Text>
+            <Text>${Number(item.precio || 0) * Number(item.cantidad || 0)}</Text>
           </View>
         ))}
         <View style={[styles.filaMonto, styles.filaTotal]}>
@@ -108,7 +172,6 @@ export default function SeguimientoPedido({ navigation, route }) {
         </View>
       </View>
 
-      {/* Rapipago */}
       {pedidoSeleccionado.codigoRapipago && (
         <View style={styles.caja}>
           <Text style={styles.titulo}>Pago en Rapipago</Text>
@@ -117,17 +180,14 @@ export default function SeguimientoPedido({ navigation, route }) {
         </View>
       )}
 
-      {/* Avisos */}
-      <Text style={styles.avisos}>
-        {pedidoSeleccionado.avisosActivados
-          ? '🔔 Te avisamos con una notificación cuando cambie el estado de tu pedido.'
-          : '🔕 Las notificaciones están desactivadas. Activalas en los ajustes del celular para recibir avisos; mientras tanto, mirá el estado acá.'}
-      </Text>
-      <Text style={styles.simulacion}>Seguimiento simulado: los tiempos y los avisos son de prueba.</Text>
+      <Text style={styles.avisos}>{pedidoSeleccionado.avisosActivados
+        ? '🔔 Tenés activadas las notificaciones para este pedido.'
+        : '🔕 Las notificaciones están desactivadas. Podés activarlas desde Configuración.'}</Text>
+      <Text style={styles.simulacion}>{seguimientoSimulado ? 'Seguimiento simulado para un pedido local anterior.' : 'Estado actualizado desde la administración de Dulces Lucho.'}</Text>
 
       {terminado ? (
         <TouchableOpacity style={styles.botonPrincipal} onPress={finalizar}>
-          <Text style={styles.botonPrincipalTexto}>Finalizar</Text>
+          <Text style={styles.botonPrincipalTexto}>{cancelado ? 'Volver al inicio' : 'Finalizar'}</Text>
         </TouchableOpacity>
       ) : (
         <TouchableOpacity style={styles.botonSecundario} onPress={() => navigation.popToTop()}>
@@ -147,6 +207,7 @@ const styles = StyleSheet.create({
   estadoNormal: { backgroundColor: '#e3f2fd' },
   estadoDestacado: { backgroundColor: '#ffe0b2' },
   estadoTerminado: { backgroundColor: '#c8e6c9' },
+  estadoCancelado: { backgroundColor: '#f8d7da' },
   estadoIcono: { fontSize: 44 },
   estadoTitulo: { fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginTop: 6 },
   estadoDetalle: { color: '#555', textAlign: 'center', marginTop: 4 },

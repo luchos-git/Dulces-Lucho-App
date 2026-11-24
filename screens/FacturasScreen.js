@@ -1,31 +1,74 @@
-// explicación del archivo: muestra los resúmenes de los pedidos guardados en el celular y aclara que todavía no son facturas fiscales
-import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+// Muestra los comprobantes internos asociados exclusivamente a la cuenta que inició sesión.
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { usePedido } from '../context/PedidoContext';
+import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
+
+const ETIQUETAS = {
+  confirmado: 'Confirmado', preparando: 'Preparando', en_camino: 'En camino',
+  listo_para_retirar: 'Listo para retirar', entregado: 'Entregado', cancelado: 'Cancelado',
+};
 
 export default function FacturasScreen() {
-  const { pedidos } = usePedido();
+  const { pedidos, sincronizarPedidos } = usePedido();
+  const { usuario } = useAuth();
+  const [cargando, setCargando] = useState(true);
+  const [actualizando, setActualizando] = useState(false);
+
+  const cargar = useCallback(async () => {
+    if (!usuario?.id) {
+      setCargando(false);
+      return;
+    }
+    try {
+      const remotos = await api(`/usuarios/${usuario.id}/pedidos`);
+      sincronizarPedidos(remotos);
+    } catch (error) {
+      console.warn('No se pudieron actualizar los comprobantes:', error.message);
+    } finally {
+      setCargando(false);
+      setActualizando(false);
+    }
+  }, [usuario?.id, sincronizarPedidos]);
+
+  useEffect(() => { setCargando(true); cargar(); }, [cargar]);
+
+  // Doble control: el contexto ya está separado por cuenta y la pantalla vuelve a filtrar por ID.
+  const pedidosUsuario = pedidos.filter((pedido) =>
+    String(pedido.usuarioId ?? pedido.usuario_id ?? '') === String(usuario?.id ?? '')
+  );
 
   return (
-    <ScrollView style={styles.contenedor} contentContainerStyle={styles.contenido}>
+    <ScrollView
+      style={styles.contenedor}
+      contentContainerStyle={styles.contenido}
+      refreshControl={<RefreshControl refreshing={actualizando} onRefresh={() => { setActualizando(true); cargar(); }} />}
+    >
       <Text style={styles.titulo}>Facturas y comprobantes</Text>
       <Text style={styles.descripcion}>
-        Acá se muestran resúmenes de las compras realizadas desde este dispositivo. No son facturas fiscales ni comprobantes emitidos por un servicio externo.
+        Estos comprobantes corresponden únicamente a tus compras. Son resúmenes internos y no facturas fiscales.
       </Text>
+      <View style={styles.identificacion}>
+        <Text style={styles.identificacionTexto}>Cuenta: #{usuario?.id ?? '—'}</Text>
+      </View>
 
-      {pedidos.length === 0 ? (
+      {cargando && pedidosUsuario.length === 0 ? (
+        <View style={styles.vacio}><ActivityIndicator color="#A66A12" /><Text style={styles.textoVacio}>Buscando tus comprobantes…</Text></View>
+      ) : pedidosUsuario.length === 0 ? (
         <View style={styles.vacio}>
           <Text style={styles.icono}>🧾</Text>
           <Text style={styles.tituloVacio}>Todavía no hay compras</Text>
-          <Text style={styles.textoVacio}>Cuando realices un pedido, su resumen aparecerá en esta sección.</Text>
+          <Text style={styles.textoVacio}>Cuando realices un pedido desde esta cuenta, su comprobante aparecerá acá.</Text>
         </View>
       ) : (
-        pedidos.map((pedido) => (
-          <View key={pedido.id} style={styles.tarjeta}>
+        pedidosUsuario.map((pedido) => (
+          <View key={`${usuario?.id}-${pedido.id}`} style={styles.tarjeta}>
             <View style={styles.encabezadoTarjeta}>
-              <Text style={styles.numero}>Pedido #{pedido.numero}</Text>
-              <Text style={styles.estado}>{pedido.estado === 'entregado' ? 'Entregado' : 'En curso'}</Text>
+              <Text style={styles.numero}>Pedido #{pedido.numero || pedido.id}</Text>
+              <Text style={styles.estado}>{ETIQUETAS[pedido.estadoPedido || pedido.estado] || pedido.estadoPedido || pedido.estado}</Text>
             </View>
+            <Text style={styles.identificador}>ID de usuario: #{usuario.id} · ID de pedido: #{pedido.pedidoId || pedido.id}</Text>
             <Text style={styles.fecha}>
               {pedido.inicio ? new Date(pedido.inicio).toLocaleDateString() : 'Fecha no disponible'}
             </Text>
@@ -36,9 +79,9 @@ export default function FacturasScreen() {
             ))}
             <View style={styles.totalFila}>
               <Text style={styles.totalEtiqueta}>Total del pedido</Text>
-              <Text style={styles.total}>${pedido.total || 0}</Text>
+              <Text style={styles.total}>${Number(pedido.total || 0).toFixed(2)}</Text>
             </View>
-            <Text style={styles.aclaracion}>resumen interno · no válido como factura fiscal</Text>
+            <Text style={styles.aclaracion}>Cuenta #{usuario.id} · resumen interno · no válido como factura fiscal</Text>
           </View>
         ))
       )}
@@ -50,15 +93,18 @@ const styles = StyleSheet.create({
   contenedor: { flex: 1, backgroundColor: '#FFF8E1' },
   contenido: { padding: 16, paddingBottom: 30 },
   titulo: { fontSize: 22, fontWeight: 'bold', color: '#35230E' },
-  descripcion: { color: '#806B4E', fontSize: 13, lineHeight: 19, marginTop: 8, marginBottom: 16 },
-  vacio: { backgroundColor: '#fff', borderRadius: 12, padding: 24, alignItems: 'center', marginTop: 12 },
-  icono: { fontSize: 38, marginBottom: 10 },
+  descripcion: { color: '#806B4E', fontSize: 13, lineHeight: 19, marginTop: 8, marginBottom: 12 },
+  identificacion: { alignSelf: 'flex-start', backgroundColor: '#FFF0D8', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 12 },
+  identificacionTexto: { color: '#89530D', fontWeight: '600', fontSize: 12 },
+  vacio: { backgroundColor: '#fff', borderRadius: 12, padding: 24, alignItems: 'center', marginTop: 12, gap: 8 },
+  icono: { fontSize: 38, marginBottom: 4 },
   tituloVacio: { fontSize: 16, fontWeight: 'bold', color: '#35230E' },
   textoVacio: { color: '#888', textAlign: 'center', marginTop: 6, lineHeight: 18 },
   tarjeta: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 12 },
-  encabezadoTarjeta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  encabezadoTarjeta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
   numero: { fontWeight: 'bold', color: '#35230E', fontSize: 15 },
   estado: { color: '#A66A12', fontSize: 12, fontWeight: '600' },
+  identificador: { color: '#806B4E', fontSize: 11, marginTop: 4 },
   fecha: { color: '#888', fontSize: 11, marginTop: 4, marginBottom: 10 },
   item: { color: '#55432B', fontSize: 13, marginBottom: 5 },
   totalFila: { flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#F1E7D8', marginTop: 10, paddingTop: 10 },

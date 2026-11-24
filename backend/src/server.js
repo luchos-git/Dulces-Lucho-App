@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
 import cors from 'cors';
 import express from 'express';
 import multer from 'multer';
@@ -7,6 +8,12 @@ import mysql from 'mysql2/promise';
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
+
+// Tokens temporales de un solo uso para modificar correo o contraseña.
+const tokensProteccionCuenta = new Map();
+const intentosProteccionCuenta = new Map();
+// Sesiones temporales emitidas después de validar credenciales y, para admin, su clave única.
+const sesionesActivas = new Map();
 
 // Pool reutilizable para las consultas a MySQL.
 const db = mysql.createPool({
@@ -44,7 +51,7 @@ function detectarImagen(buf) {
 
 const selectProductos = `
   SELECT p.id, p.nombre, c.nombre AS categoria, p.descripcion, p.precio,
-         p.imagen_url AS imagenUrl, p.imagenes_json AS imagenesJson, p.activo
+         p.imagen_url AS imagenUrl, p.imagen_url AS miniaturaUrl, p.imagenes_json AS imagenesJson, p.activo
   FROM productos p
   INNER JOIN categorias c ON c.id = p.categoria_id
 `;
@@ -57,18 +64,59 @@ function validarProducto(producto) {
       !Number.isFinite(Number(producto.precio)) || Number(producto.precio) <= 0) {
     return 'Ingresá un precio mayor a cero.';
   }
-  if (producto.imagenUrl && String(producto.imagenUrl).length > 255) {
-    return 'La dirección de la imagen supera los 255 caracteres.';
+  if (producto.imagenUrl && String(producto.imagenUrl).length > 1000) {
+    return 'La dirección de la imagen supera los 1000 caracteres.';
   }
   if (Array.isArray(producto.imagenes) && producto.imagenes.length > 3) return 'Cada producto puede tener como máximo tres imágenes.';
   return null;
 }
 
+// Convierte los formatos antiguos y nuevos de la base de datos en una lista uniforme de URLs.
+function normalizarListaImagenes(valor, imagenPrincipal = '') {
+  let lista = valor;
+  if (Buffer.isBuffer(lista)) lista = lista.toString('utf8');
+
+  // Compatibilidad con JSON normal, JSON doblemente serializado y formatos viejos de ImgBB.
+  for (let intento = 0; intento < 2 && typeof lista === 'string' && lista.trim(); intento += 1) {
+    const texto = lista.trim();
+    try {
+      lista = JSON.parse(texto);
+    } catch {
+      lista = /^https?:\/\//i.test(texto) ? [texto] : [];
+      break;
+    }
+  }
+  if (!Array.isArray(lista)) lista = lista ? [lista] : [];
+
+  const urls = lista.map((item) => {
+    if (typeof item === 'string') return item;
+    return item?.url || item?.imagenUrl || item?.imageUrl || item?.src || item?.displayUrl || item?.display_url || item?.data?.url || item?.data?.display_url || '';
+  }).map((url) => String(url || '').trim()).filter((url) => /^https?:\/\//i.test(url));
+
+  const principal = String(imagenPrincipal || '').trim();
+  if (!urls.length && principal && /^https?:\/\//i.test(principal)) urls.push(principal);
+  return [...new Set(urls)].slice(0, 3);
+}
+
 function normalizarProducto(producto) {
-  let imagenes = [];
-  try { imagenes = producto.imagenesJson ? JSON.parse(producto.imagenesJson) : []; } catch { imagenes = []; }
-  if (!imagenes.length && producto.imagenUrl) imagenes = [producto.imagenUrl];
-  return { ...producto, imagenes, imagenUrl: imagenes[0] || producto.imagenUrl || '' };
+  const principal = producto.imagenUrl || producto.imagen_url || producto.miniaturaUrl || producto.miniatura_url || producto.portada || producto.imagen || '';
+  const imagenes = normalizarListaImagenes(
+    producto.imagenesJson ?? producto.imagenes_json ?? producto.imagenes ?? producto.galeria,
+    principal
+  );
+  const miniaturaUrl = imagenes[0] || principal || '';
+  return { ...producto, imagenes, imagenUrl: miniaturaUrl, miniaturaUrl };
+}
+
+function obtenerImagenesEntrada(producto) {
+  const principal = String(
+    producto?.imagenUrl || producto?.imagen_url || producto?.miniaturaUrl ||
+    producto?.miniatura_url || producto?.portada || ''
+  ).trim();
+  return normalizarListaImagenes(
+    producto?.imagenes ?? producto?.imagenesJson ?? producto?.imagenes_json ?? producto?.galeria,
+    principal
+  );
 }
 
 // Busca una categoría existente sin crear registros nuevos desde el formulario.
@@ -82,6 +130,129 @@ async function obtenerCategoriaExistente(nombre) {
   return categoria || null;
 }
 
+// Sesión de servidor: el adminId que manda el cliente NO alcanza para autorizar una acción.
+function leerSesion(req) {
+  const encabezado = String(req.headers.authorization || '');
+  const token = encabezado.startsWith('Bearer ') ? encabezado.slice(7).trim() : '';
+  if (!token) return null;
+  const sesion = sesionesActivas.get(token);
+  if (!sesion || sesion.expira <= Date.now()) {
+    sesionesActivas.delete(token);
+    return null;
+  }
+  return { ...sesion, token };
+}
+
+function crearTokenSesion(usuarioId) {
+  const token = randomBytes(32).toString('hex');
+  sesionesActivas.set(token, { usuarioId: Number(usuarioId), expira: Date.now() + 12 * 60 * 60 * 1000 });
+  return token;
+}
+
+function parsearPermisos(valor) {
+  try {
+    const permisos = typeof valor === 'string' ? JSON.parse(valor || '[]') : valor;
+    return Array.isArray(permisos) ? permisos.filter((p) => typeof p === 'string') : [];
+  } catch { return []; }
+}
+
+async function cargarDatosSesion(usuarioId) {
+  const [[fila]] = await db.query(
+    `SELECT u.id, u.nombre, u.email, u.telefono, u.foto_perfil_url AS fotoPerfilUrl, u.rol,
+            u.permisos_admin_json AS permisosAdminJson,
+            EXISTS(SELECT 1 FROM propietario_sistema ps WHERE ps.usuario_id = u.id) AS esPropietario
+     FROM usuarios u WHERE u.id = ? AND u.activo = 1 LIMIT 1`, [usuarioId]
+  );
+  if (!fila) return null;
+  const permisosAdmin = parsearPermisos(fila.permisosAdminJson);
+  return {
+    id: fila.id, nombre: fila.nombre, email: fila.email, telefono: fila.telefono || '',
+    fotoPerfilUrl: fila.fotoPerfilUrl || '', rol: fila.rol,
+    esPropietario: Boolean(Number(fila.esPropietario)), permisosAdmin,
+    permisos: Boolean(Number(fila.esPropietario)) ? ['*'] : permisosAdmin,
+  };
+}
+
+async function verificarPermisoAdmin(req, permiso, adminIdOpcional = null) {
+  const sesion = leerSesion(req);
+  if (!sesion || (adminIdOpcional != null && sesion.usuarioId !== Number(adminIdOpcional))) return false;
+  const datos = await cargarDatosSesion(sesion.usuarioId);
+  if (!datos || datos.rol !== 'admin') return false;
+  if (datos.esPropietario) return true;
+  return Boolean(permiso && datos.permisosAdmin.includes(permiso));
+}
+
+async function verificarPropietario(req) {
+  const sesion = leerSesion(req);
+  if (!sesion) return false;
+  const [[fila]] = await db.query(
+    `SELECT u.id FROM usuarios u INNER JOIN propietario_sistema ps ON ps.usuario_id = u.id
+     WHERE u.id = ? AND u.rol = 'admin' AND u.activo = 1 LIMIT 1`, [sesion.usuarioId]
+  );
+  return Boolean(fila);
+}
+
+function verificarSesionPropia(req, usuarioId) {
+  const sesion = leerSesion(req);
+  return Boolean(sesion && sesion.usuarioId === Number(usuarioId));
+}
+
+function revocarSesionesUsuario(usuarioId) {
+  for (const [token, datos] of sesionesActivas) {
+    if (datos.usuarioId === Number(usuarioId)) sesionesActivas.delete(token);
+  }
+}
+
+const PERMISOS_ADMIN = [
+  { codigo: 'gestionar_productos', nombre: 'Productos y categorías' },
+  { codigo: 'gestionar_pedidos', nombre: 'Pedidos y ventas' },
+  { codigo: 'ver_reportes', nombre: 'Reportes y estadísticas' },
+  { codigo: 'gestionar_usuarios', nombre: 'Administrar clientes' },
+  { codigo: 'gestionar_empleados', nombre: 'Habilitar o pausar empleados administradores' },
+  { codigo: 'gestionar_banners', nombre: 'Banners del inicio' },
+  { codigo: 'configurar_tienda', nombre: 'Configuración de la tienda' },
+  { codigo: 'gestionar_insumos', nombre: 'Inventario e ingredientes' },
+  { codigo: 'solicitar_compras', nombre: 'Solicitar compras grandes' },
+];
+
+async function exigirSesionUsuario(req, res, usuarioId) {
+  if (!verificarSesionPropia(req, usuarioId)) {
+    res.status(401).json({ error: 'La sesión no corresponde a esta cuenta. Cerrá sesión e ingresá nuevamente.' });
+    return false;
+  }
+  const [[fila]] = await db.query('SELECT id FROM usuarios WHERE id = ? AND activo = 1 LIMIT 1', [Number(usuarioId)]);
+  if (!fila) { res.status(401).json({ error: 'La cuenta está inactiva o ya no existe.' }); return false; }
+  return true;
+}
+
+const METODOS_PAGO_VALIDOS = ['credito', 'debito', 'rapipago'];
+const ESTADOS_PEDIDO_VALIDOS = ['confirmado', 'preparando', 'en_camino', 'listo_para_retirar', 'entregado', 'cancelado'];
+
+function normalizarConfiguracionTienda(fila = {}) {
+  return {
+    nombre: fila.nombre || 'Dulces Lucho',
+    telefono: fila.telefono || '',
+    email: fila.email || '',
+    direccion: fila.direccion || '',
+    localidad: fila.localidad || '',
+    descripcion: fila.descripcion || '',
+    horario: fila.horario || '',
+    condicionesVenta: fila.condiciones_venta || '',
+    envioHabilitado: Boolean(Number(fila.envio_habilitado ?? 1)),
+    costoEnvioBase: Number(fila.costo_envio_base || 0),
+    metodosPago: {
+      credito: Boolean(Number(fila.pago_credito_activo ?? 1)),
+      debito: Boolean(Number(fila.pago_debito_activo ?? 1)),
+      rapipago: Boolean(Number(fila.pago_rapipago_activo ?? 1)),
+    },
+  };
+}
+
+async function obtenerConfiguracionTienda() {
+  const [[fila]] = await db.query('SELECT * FROM configuracion_tienda WHERE id = 1');
+  return normalizarConfiguracionTienda(fila || {});
+}
+
 // Comprueba que el teléfono llega al proceso Express, sin consultar MySQL.
 app.get('/api/ping', (_req, res) => res.json({ ok: true, mensaje: 'Backend accesible por red.' }));
 
@@ -89,9 +260,17 @@ app.get('/api/estado', async (_req, res) => {
   try {
     // Además de probar la conexión, verifica que exista la tabla y las columnas usadas por el registro.
     await db.query(
-      'SELECT id, nombre, email, password_hash, rol, clave_unica_hash, activo FROM usuarios LIMIT 0'
+      'SELECT id, nombre, email, telefono, foto_perfil_url, direccion_entrega, localidad_entrega, metodo_pago_preferido, notificaciones_activas, password_hash, rol, clave_unica_hash, activo FROM usuarios LIMIT 0'
     );
-    res.json({ ok: true, mensaje: 'Backend, MySQL y tabla usuarios conectados.' });
+    await db.query('SELECT numero, estado_pedido FROM ventas LIMIT 0');
+    await db.query('SELECT * FROM configuracion_tienda LIMIT 0');
+    await db.query('SELECT id, titulo, imagen_url, orden, activo, creado_en FROM banners LIMIT 0');
+    await db.query('SELECT id, usuario_id FROM propietario_sistema LIMIT 0');
+    await db.query('SELECT id, nombre, unidad, stock_actual, stock_minimo, proveedor, activo FROM insumos LIMIT 0');
+    await db.query('SELECT producto_id, insumo_id, cantidad_por_producto FROM recetas_productos LIMIT 0');
+    await db.query('SELECT id, numero, proveedor, estado, creado_por_usuario_id FROM compras_insumos LIMIT 0');
+    await db.query('SELECT id, compra_id, insumo_id, cantidad FROM detalle_compras_insumos LIMIT 0');
+    res.json({ ok: true, mensaje: 'Backend, MySQL, banners, propietario, permisos e inventario conectados.' });
   } catch (error) {
     console.error('Error al verificar MySQL/tabla usuarios:', error.code || '', error.sqlMessage || error.message);
     res.status(503).json({
@@ -115,12 +294,13 @@ app.get('/api/categorias', async (_req, res) => {
     res.json(actualizadas);
   } catch (error) {
     console.error('Error al consultar categorías:', error.message);
-    res.status(500).json({ error: 'No se pudieron consultar las categorías.' });
+    res.status(500).json({ error: 'No se pudieron consultar las categorías.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   }
 });
 
 // CREATE: agrega una categoría nueva evitando duplicados por mayúsculas o espacios.
 app.post('/api/categorias', async (req, res) => {
+  if (!await verificarPermisoAdmin(req, 'gestionar_productos')) return res.status(403).json({ error: 'No tenés permiso para administrar categorías.' });
   const nombre = String(req.body?.nombre || '').trim().replace(/\s+/g, ' ');
   if (!nombre) return res.status(400).json({ error: 'Escribí el nombre de la categoría.' });
   if (nombre.length > 60) return res.status(400).json({ error: 'La categoría no puede superar los 60 caracteres.' });
@@ -131,7 +311,7 @@ app.post('/api/categorias', async (req, res) => {
     res.status(201).json({ id: resultado.insertId, nombre });
   } catch (error) {
     console.error('Error al crear categoría:', error.message);
-    res.status(500).json({ error: 'No se pudo crear la categoría.' });
+    res.status(500).json({ error: 'No se pudo crear la categoría.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   }
 });
 
@@ -142,7 +322,7 @@ app.get('/api/productos', async (_req, res) => {
     res.json(productos.map(normalizarProducto));
   } catch (error) {
     console.error('Error al consultar productos:', error.message);
-    res.status(500).json({ error: 'No se pudieron consultar los productos.' });
+    res.status(500).json({ error: 'No se pudieron consultar los productos.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   }
 });
 
@@ -156,39 +336,43 @@ app.get('/api/productos/:id', async (req, res) => {
     res.json(normalizarProducto(producto));
   } catch (error) {
     console.error('Error al consultar producto:', error.message);
-    res.status(500).json({ error: 'No se pudo consultar el producto.' });
+    res.status(500).json({ error: 'No se pudo consultar el producto.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   }
 });
 
 // CREATE: guarda un producto nuevo. La categoría debe existir previamente en MySQL.
 app.post('/api/productos', async (req, res) => {
+  if (!await verificarPermisoAdmin(req, 'gestionar_productos')) return res.status(403).json({ error: 'No tenés permiso para publicar productos.' });
   const errorValidacion = validarProducto(req.body);
   if (errorValidacion) return res.status(400).json({ error: errorValidacion });
-  const { nombre, categoria, descripcion = '', precio, imagenUrl = '', imagenes = [] } = req.body;
+  const { nombre, categoria, descripcion = '', precio, imagenUrl = '' } = req.body;
+  const imagenes = obtenerImagenesEntrada(req.body);
   try {
     const categoriaExistente = await obtenerCategoriaExistente(categoria);
     if (!categoriaExistente) return res.status(400).json({ error: 'La categoría seleccionada no existe. Actualizá la lista y elegí una opción.' });
 
     const [resultado] = await db.query(
       'INSERT INTO productos (nombre, categoria_id, descripcion, precio, imagen_url, imagenes_json) VALUES (?, ?, ?, ?, ?, ?)',
-      [nombre.trim(), categoriaExistente.id, descripcion.trim() || null, Number(precio), (imagenes[0] || imagenUrl) || null, JSON.stringify(imagenes.slice(0, 3))]
+      [nombre.trim(), categoriaExistente.id, descripcion.trim() || null, Number(precio), (imagenes[0] || imagenUrl) || null, JSON.stringify(imagenes)]
     );
     const [[producto]] = await db.query(`${selectProductos} WHERE p.id = ?`, [resultado.insertId]);
     res.status(201).json(normalizarProducto(producto));
   } catch (error) {
     console.error('Error al crear producto:', error.message);
-    res.status(500).json({ error: 'No se pudo publicar el producto.' });
+    res.status(500).json({ error: 'No se pudo publicar el producto.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   }
 });
 
 // UPDATE: cambia los datos de un producto existente.
 app.put('/api/productos/:id', async (req, res) => {
+  if (!await verificarPermisoAdmin(req, 'gestionar_productos')) return res.status(403).json({ error: 'No tenés permiso para editar productos.' });
   const id = Number(req.params.id);
   const errorValidacion = validarProducto(req.body);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID del producto no es válido.' });
   if (errorValidacion) return res.status(400).json({ error: errorValidacion });
 
-  const { nombre, categoria, descripcion = '', precio, imagenUrl = '', imagenes = [] } = req.body;
+  const { nombre, categoria, descripcion = '', precio, imagenUrl = '' } = req.body;
+  const imagenes = obtenerImagenesEntrada(req.body);
   try {
     const [[existente]] = await db.query('SELECT id FROM productos WHERE id = ? AND activo = 1', [id]);
     if (!existente) return res.status(404).json({ error: 'No se encontró un producto activo con ese ID.' });
@@ -200,18 +384,19 @@ app.put('/api/productos/:id', async (req, res) => {
       `UPDATE productos
        SET nombre = ?, categoria_id = ?, descripcion = ?, precio = ?, imagen_url = ?, imagenes_json = ?
        WHERE id = ? AND activo = 1`,
-      [nombre.trim(), categoriaExistente.id, descripcion.trim() || null, Number(precio), (imagenes[0] || imagenUrl) || null, JSON.stringify(imagenes.slice(0, 3)), id]
+      [nombre.trim(), categoriaExistente.id, descripcion.trim() || null, Number(precio), (imagenes[0] || imagenUrl) || null, JSON.stringify(imagenes), id]
     );
     const [[producto]] = await db.query(`${selectProductos} WHERE p.id = ? AND p.activo = 1`, [id]);
     res.json(normalizarProducto(producto));
   } catch (error) {
     console.error('Error al actualizar producto:', error.message);
-    res.status(500).json({ error: 'No se pudo actualizar el producto.' });
+    res.status(500).json({ error: 'No se pudo actualizar el producto.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   }
 });
 
 // DELETE: realiza una baja lógica para no romper las ventas que ya existen.
 app.delete('/api/productos/:id', async (req, res) => {
+  if (!await verificarPermisoAdmin(req, 'gestionar_productos')) return res.status(403).json({ error: 'No tenés permiso para quitar productos.' });
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID del producto no es válido.' });
   try {
@@ -220,14 +405,43 @@ app.delete('/api/productos/:id', async (req, res) => {
     res.json({ ok: true, id, mensaje: 'Producto eliminado del catálogo.' });
   } catch (error) {
     console.error('Error al eliminar producto:', error.message);
-    res.status(500).json({ error: 'No se pudo eliminar el producto.' });
+    res.status(500).json({ error: 'No se pudo eliminar el producto.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   }
 });
+
+// Sube un buffer validado a ImgBB y devuelve las URLs recibidas.
+async function subirBufferAImgBB(buffer) {
+  const tipo = detectarImagen(buffer);
+  if (!tipo) throw new Error('El archivo no contiene una imagen JPG, PNG, GIF, WEBP o BMP válida.');
+  const clave = process.env.IMGBB_API_KEY;
+  if (!clave || clave === 'PEGAR_AQUI_LA_CLAVE_DE_IMGBB' || clave === 'colocar_la_clave_privada_de_imgbb') {
+    const error = new Error('Falta configurar IMGBB_API_KEY en backend/.env.');
+    error.status = 503;
+    throw error;
+  }
+  const cuerpo = new URLSearchParams({ image: buffer.toString('base64') });
+  const respuesta = await fetch(`https://api.imgbb.com/1/upload?key=${encodeURIComponent(clave)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: cuerpo.toString(),
+    signal: AbortSignal.timeout(30000),
+  });
+  const datos = await respuesta.json().catch(() => ({}));
+  if (!respuesta.ok || !datos.success || !datos.data?.url) {
+    const detalle = datos?.error?.message || `ImgBB rechazó la imagen (HTTP ${respuesta.status}).`;
+    const error = new Error(detalle);
+    error.status = 502;
+    throw error;
+  }
+  return { imagenUrl: datos.data.url, displayUrl: datos.data.display_url || datos.data.url };
+}
 
 // Sube una imagen a ImgBB usando la clave guardada en backend/.env. Acepta dos formas de envío:
 //  - multipart/form-data con un archivo (Thunder Client). El nombre del campo puede ser cualquiera.
 //  - JSON { "image": "<base64>" } (la app en Expo Go).
-app.post('/api/imagenes/producto', upload.any(), async (req, res) => {
+app.post(['/api/imagenes/producto', '/api/imagenes/perfil'], upload.any(), async (req, res) => {
+  if (req.path.endsWith('/producto') && !await verificarPermisoAdmin(req, 'gestionar_productos')) return res.status(403).json({ error: 'No tenés permiso para subir imágenes de productos.' });
+  if (req.path.endsWith('/perfil') && !leerSesion(req)) return res.status(401).json({ error: 'Iniciá sesión para subir tu foto de perfil.' });
   let buffer = req.files?.[0]?.buffer;
   if (!buffer) {
     const base64 = req.body?.image ?? req.body?.imagenBase64;
@@ -275,11 +489,771 @@ app.post('/api/imagenes/producto', upload.any(), async (req, res) => {
   }
 });
 
+// BANNERS DEL INICIO: el cliente ve solo los activos; el administrador puede consultar todos.
+const selectBanners = `
+  SELECT id, titulo, imagen_url AS imagenUrl, orden, activo, creado_en AS creadoEn
+  FROM banners
+`;
+
+app.get('/api/banners/admin', async (req, res) => {
+  if (!await verificarPermisoAdmin(req, 'gestionar_banners')) return res.status(403).json({ error: 'No tenés permiso para administrar banners.' });
+  try {
+    const [banners] = await db.query(`${selectBanners} ORDER BY orden ASC, id DESC`);
+    res.json(banners);
+  } catch (error) {
+    console.error('Error al consultar banners de administración:', error.message);
+    res.status(500).json({ error: 'No se pudieron consultar los banners. Revisá la migración de la tabla banners.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.get('/api/banners', async (_req, res) => {
+  try {
+    const [banners] = await db.query(`${selectBanners} WHERE activo = 1 ORDER BY orden ASC, id DESC`);
+    res.json(banners);
+  } catch (error) {
+    console.error('Error al consultar banners:', error.message);
+    res.status(500).json({ error: 'No se pudieron cargar los banners del inicio.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.post('/api/banners', async (req, res) => {
+  if (!await verificarPermisoAdmin(req, 'gestionar_banners')) return res.status(403).json({ error: 'No tenés permiso para administrar banners.' });
+  const titulo = String(req.body?.titulo || '').trim();
+  const imagenUrl = String(req.body?.imagenUrl || '').trim();
+  const ordenEnviado = req.body?.orden;
+  if (!imagenUrl || !/^https?:\/\//i.test(imagenUrl)) {
+    return res.status(400).json({ error: 'Subí una imagen a ImgBB y enviá su imagenUrl.' });
+  }
+  if (titulo.length > 120 || imagenUrl.length > 500) {
+    return res.status(400).json({ error: 'El título o la dirección de imagen superan el largo permitido.' });
+  }
+
+  try {
+    let orden;
+    if (ordenEnviado === undefined || ordenEnviado === null || ordenEnviado === '') {
+      const [[fila]] = await db.query('SELECT COALESCE(MAX(orden), -1) + 1 AS siguiente FROM banners');
+      orden = Number(fila.siguiente);
+    } else {
+      orden = Number(ordenEnviado);
+      if (!Number.isInteger(orden)) return res.status(400).json({ error: 'El orden debe ser un número entero.' });
+    }
+
+    const [resultado] = await db.query(
+      'INSERT INTO banners (titulo, imagen_url, orden, activo) VALUES (?, ?, ?, 1)',
+      [titulo || null, imagenUrl, orden]
+    );
+    const [[banner]] = await db.query(`${selectBanners} WHERE id = ?`, [resultado.insertId]);
+    res.status(201).json(banner);
+  } catch (error) {
+    console.error('Error al crear banner:', error.message);
+    res.status(500).json({ error: 'No se pudo guardar el banner.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.put('/api/banners/:id', async (req, res) => {
+  if (!await verificarPermisoAdmin(req, 'gestionar_banners')) return res.status(403).json({ error: 'No tenés permiso para administrar banners.' });
+  const id = Number(req.params.id);
+  const titulo = String(req.body?.titulo || '').trim();
+  const imagenUrl = String(req.body?.imagenUrl || '').trim();
+  const orden = Number(req.body?.orden);
+  const activo = req.body?.activo === false || Number(req.body?.activo) === 0 ? 0 : 1;
+
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID del banner no es válido.' });
+  if (!imagenUrl || !/^https?:\/\//i.test(imagenUrl)) return res.status(400).json({ error: 'La imagen del banner debe ser una URL HTTP o HTTPS.' });
+  if (titulo.length > 120 || imagenUrl.length > 500) return res.status(400).json({ error: 'El título o la dirección de imagen superan el largo permitido.' });
+  if (!Number.isInteger(orden)) return res.status(400).json({ error: 'El orden debe ser un número entero.' });
+
+  try {
+    const [[existente]] = await db.query('SELECT id FROM banners WHERE id = ?', [id]);
+    if (!existente) return res.status(404).json({ error: 'No se encontró el banner.' });
+    await db.query(
+      'UPDATE banners SET titulo = ?, imagen_url = ?, orden = ?, activo = ? WHERE id = ?',
+      [titulo || null, imagenUrl, orden, activo, id]
+    );
+    const [[banner]] = await db.query(`${selectBanners} WHERE id = ?`, [id]);
+    res.json(banner);
+  } catch (error) {
+    console.error('Error al actualizar banner:', error.message);
+    res.status(500).json({ error: 'No se pudo actualizar el banner.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Baja lógica: el banner deja de mostrarse en el inicio, pero se conserva su registro.
+app.delete('/api/banners/:id', async (req, res) => {
+  if (!await verificarPermisoAdmin(req, 'gestionar_banners')) return res.status(403).json({ error: 'No tenés permiso para administrar banners.' });
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID del banner no es válido.' });
+  try {
+    const [[existente]] = await db.query('SELECT id FROM banners WHERE id = ?', [id]);
+    if (!existente) return res.status(404).json({ error: 'No se encontró el banner.' });
+    await db.query('UPDATE banners SET activo = 0 WHERE id = ?', [id]);
+    res.json({ ok: true, id, mensaje: 'Banner quitado del carrusel.' });
+  } catch (error) {
+    console.error('Error al eliminar banner:', error.message);
+    res.status(500).json({ error: 'No se pudo quitar el banner.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Recibe base64 desde Expo, sube a ImgBB y guarda la URL en MySQL en una sola operación.
+// Así evitamos que la imagen se suba correctamente pero la URL no quede asociada al usuario.
+app.post('/api/usuarios/:id/foto-perfil', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!verificarSesionPropia(req, id)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta. Volvé a iniciar sesión.' });
+  const base64 = String(req.body?.image || req.body?.imagenBase64 || '').trim();
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID de usuario no es válido.' });
+  if (!base64) return res.status(400).json({ error: 'No llegó la imagen desde el celular. Volvé a elegirla e intentá otra vez.' });
+  // Rechaza cargas excesivas antes de decodificar el base64.
+  if (base64.length > Math.ceil(MAX_IMAGEN * 4 / 3) + 256) return res.status(413).json({ error: 'La foto de perfil supera el límite de 5 MB.' });
+  const limpio = base64.replace(/^data:[^;]+;base64,/i, '').replace(/\s/g, '');
+  const buffer = Buffer.from(limpio, 'base64');
+  if (!buffer.length || buffer.length > MAX_IMAGEN) return res.status(413).json({ error: 'La foto está vacía o supera el límite de 5 MB.' });
+  try {
+    const [[existente]] = await db.query('SELECT id FROM usuarios WHERE id = ? AND activo = 1', [id]);
+    if (!existente) return res.status(404).json({ error: 'No se encontró una cuenta activa para guardar la foto.' });
+    const subida = await subirBufferAImgBB(buffer);
+    await db.query('UPDATE usuarios SET foto_perfil_url = ? WHERE id = ? AND activo = 1', [subida.imagenUrl, id]);
+    const [[usuario]] = await db.query(
+      'SELECT id, nombre, email, telefono, foto_perfil_url AS fotoPerfilUrl, rol FROM usuarios WHERE id = ? AND activo = 1',
+      [id]
+    );
+    return res.status(201).json({ ...usuario, telefono: usuario.telefono || '', fotoPerfilUrl: usuario.fotoPerfilUrl || '', imagenUrl: subida.imagenUrl, displayUrl: subida.displayUrl });
+  } catch (error) {
+    console.error('Error al subir/guardar foto de perfil:', { mensaje: error.message, codigo: error.code || null, detalle: error.sqlMessage || null });
+    return res.status(error.status || 500).json({ error: error.message || 'No se pudo subir y guardar la foto de perfil. Revisá la conexión y la clave ImgBB.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Consulta solo los datos públicos del perfil; nunca devuelve hashes ni contraseñas.
+app.get('/api/usuarios/:id/perfil', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!verificarSesionPropia(req, id)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID de usuario no es válido.' });
+  try {
+    const [[usuario]] = await db.query(
+      'SELECT id, nombre, email, telefono, foto_perfil_url AS fotoPerfilUrl, rol FROM usuarios WHERE id = ? AND activo = 1',
+      [id]
+    );
+    if (!usuario) return res.status(404).json({ error: 'No se encontró la cuenta.' });
+    res.json({ ...usuario, telefono: usuario.telefono || '' });
+  } catch (error) {
+    console.error('Error al consultar el perfil:', error.message);
+    res.status(500).json({ error: 'No se pudo consultar el perfil. Revisá que hayas ejecutado la migración.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Permite editar el nombre y el teléfono del perfil de una cuenta existente.
+app.put('/api/usuarios/:id/perfil', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!verificarSesionPropia(req, id)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  const nombre = String(req.body?.nombre || '').trim();
+  const telefono = String(req.body?.telefono || '').trim();
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID de usuario no es válido.' });
+  if (!nombre) return res.status(400).json({ error: 'El nombre no puede quedar vacío.' });
+  if (nombre.length > 100 || telefono.length > 30) return res.status(400).json({ error: 'El nombre o teléfono superan el largo permitido.' });
+
+  try {
+    const [resultado] = await db.query(
+      'UPDATE usuarios SET nombre = ?, telefono = ? WHERE id = ? AND activo = 1',
+      [nombre, telefono || null, id]
+    );
+    if (!resultado.affectedRows) {
+      const [[existente]] = await db.query('SELECT id FROM usuarios WHERE id = ? AND activo = 1', [id]);
+      if (!existente) return res.status(404).json({ error: 'No se encontró la cuenta.' });
+    }
+    const [[usuario]] = await db.query(
+      'SELECT id, nombre, email, telefono, foto_perfil_url AS fotoPerfilUrl, rol FROM usuarios WHERE id = ? AND activo = 1',
+      [id]
+    );
+    res.json({ ...usuario, telefono: usuario.telefono || '' });
+  } catch (error) {
+    console.error('Error al actualizar el perfil:', error.message);
+    res.status(500).json({ error: 'No se pudo actualizar el perfil. Revisá que hayas ejecutado la migración.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+
+// Guarda en MySQL la URL de ImgBB asociada al perfil de la cuenta indicada.
+app.put('/api/usuarios/:id/foto-perfil', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!verificarSesionPropia(req, id)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  const imagenUrl = String(req.body?.imagenUrl || '').trim();
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID de usuario no es válido.' });
+  if (imagenUrl.length > 1000 || !/^https:\/\//i.test(imagenUrl)) {
+    return res.status(400).json({ error: 'La foto de perfil debe ser una URL HTTPS válida.' });
+  }
+  try {
+    const [resultado] = await db.query(
+      'UPDATE usuarios SET foto_perfil_url = ? WHERE id = ? AND activo = 1',
+      [imagenUrl, id]
+    );
+    if (!resultado.affectedRows) {
+      const [[existente]] = await db.query('SELECT id FROM usuarios WHERE id = ? AND activo = 1', [id]);
+      if (!existente) return res.status(404).json({ error: 'No se encontró la cuenta.' });
+    }
+    const [[usuario]] = await db.query(
+      'SELECT id, nombre, email, telefono, foto_perfil_url AS fotoPerfilUrl, rol FROM usuarios WHERE id = ? AND activo = 1',
+      [id]
+    );
+    res.json({ ...usuario, telefono: usuario.telefono || '', fotoPerfilUrl: usuario.fotoPerfilUrl || '' });
+  } catch (error) {
+    console.error('Error al guardar foto de perfil:', error.message);
+    res.status(500).json({ error: 'No se pudo guardar la foto de perfil. Ejecutá la migración de foto de perfil.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+
+// PREFERENCIAS DE LA CUENTA: dirección, medio de pago preferido y notificaciones.
+app.get('/api/usuarios/:id/preferencias', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!verificarSesionPropia(req, id)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID de usuario no es válido.' });
+  try {
+    const [[usuario]] = await db.query(
+      `SELECT id, direccion_entrega AS direccion, localidad_entrega AS localidad,
+              metodo_pago_preferido AS metodoPagoPreferido, notificaciones_activas AS notificacionesActivas
+       FROM usuarios WHERE id = ? AND activo = 1`, [id]
+    );
+    if (!usuario) return res.status(404).json({ error: 'No se encontró la cuenta.' });
+    res.json({
+      ...usuario,
+      direccion: usuario.direccion || '',
+      localidad: usuario.localidad || '',
+      metodoPagoPreferido: usuario.metodoPagoPreferido || '',
+      notificacionesActivas: Boolean(Number(usuario.notificacionesActivas)),
+    });
+  } catch (error) {
+    console.error('Error al consultar preferencias:', error.message);
+    res.status(500).json({ error: 'No se pudieron consultar las preferencias. Revisá la migración de configuración.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.put('/api/usuarios/:id/preferencias', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!verificarSesionPropia(req, id)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  const direccion = String(req.body?.direccion || '').trim();
+  const localidad = String(req.body?.localidad || '').trim();
+  const metodoPagoPreferido = String(req.body?.metodoPagoPreferido || '').trim();
+  const notificacionesActivas = req.body?.notificacionesActivas === false || Number(req.body?.notificacionesActivas) === 0 ? 0 : 1;
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID de usuario no es válido.' });
+  if (direccion.length > 200 || localidad.length > 100) return res.status(400).json({ error: 'La dirección o localidad supera el largo permitido.' });
+  if (metodoPagoPreferido && !METODOS_PAGO_VALIDOS.includes(metodoPagoPreferido)) return res.status(400).json({ error: 'El medio de pago preferido no es válido.' });
+  try {
+    if (metodoPagoPreferido) {
+      const tienda = await obtenerConfiguracionTienda();
+      if (!tienda.metodosPago[metodoPagoPreferido]) return res.status(400).json({ error: 'Ese medio de pago no está habilitado actualmente por la tienda.' });
+    }
+    const [resultado] = await db.query(
+      `UPDATE usuarios SET direccion_entrega = ?, localidad_entrega = ?,
+       metodo_pago_preferido = ?, notificaciones_activas = ? WHERE id = ? AND activo = 1`,
+      [direccion || null, localidad || null, metodoPagoPreferido || null, notificacionesActivas, id]
+    );
+    if (!resultado.affectedRows) {
+      const [[existe]] = await db.query('SELECT id FROM usuarios WHERE id = ? AND activo = 1', [id]);
+      if (!existe) return res.status(404).json({ error: 'No se encontró la cuenta.' });
+    }
+    res.json({ ok: true, mensaje: 'Preferencias guardadas.' });
+  } catch (error) {
+    console.error('Error al guardar preferencias:', error.message);
+    res.status(500).json({ error: 'No se pudieron guardar las preferencias. Revisá la migración de configuración.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Los cambios de correo/contraseña ahora requieren el flujo de protección de cuenta.
+// Se conserva esta ruta antigua solo para devolver una indicación clara a clientes desactualizados.
+app.post('/api/usuarios/:id/password', async (_req, res) => {
+  res.status(410).json({ error: 'Esta ruta fue reemplazada. Usá Configuración > Privacidad y seguridad para verificar tu cuenta antes de cambiar la contraseña.' });
+});
+
+// Configuración pública de la tienda: medios de pago habilitados y datos para mostrar al cliente.
+app.get('/api/configuracion-tienda', async (_req, res) => {
+  try {
+    res.json(await obtenerConfiguracionTienda());
+  } catch (error) {
+    console.error('Error al consultar configuración de tienda:', error.message);
+    res.status(500).json({ error: 'No se pudo consultar la configuración de la tienda. Ejecutá la migración.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.put('/api/admin/configuracion-tienda', async (req, res) => {
+  const adminId = Number(req.body?.adminId);
+  if (!await verificarPermisoAdmin(req, 'configurar_tienda', adminId)) return res.status(403).json({ error: 'Se requiere una cuenta administradora activa.' });
+  const b = req.body || {};
+  const datos = {
+    nombre: String(b.nombre || '').trim(), telefono: String(b.telefono || '').trim(), email: String(b.email || '').trim(),
+    direccion: String(b.direccion || '').trim(), localidad: String(b.localidad || '').trim(),
+    descripcion: String(b.descripcion || '').trim(), horario: String(b.horario || '').trim(),
+    condiciones: String(b.condicionesVenta || '').trim(),
+    envio: b.envioHabilitado === false || Number(b.envioHabilitado) === 0 ? 0 : 1,
+    costo: Number(b.costoEnvioBase || 0),
+    credito: b.metodosPago?.credito === false ? 0 : 1,
+    debito: b.metodosPago?.debito === false ? 0 : 1,
+    rapipago: b.metodosPago?.rapipago === false ? 0 : 1,
+  };
+  if (!datos.nombre || datos.nombre.length > 120 || datos.telefono.length > 30 || datos.email.length > 150 || datos.direccion.length > 200 || datos.localidad.length > 100 || datos.descripcion.length > 500 || datos.horario.length > 120 || datos.condiciones.length > 1000 || !Number.isFinite(datos.costo) || datos.costo < 0) {
+    return res.status(400).json({ error: 'Revisá los datos de la tienda y el costo de envío.' });
+  }
+  if (!datos.credito && !datos.debito && !datos.rapipago) return res.status(400).json({ error: 'Debe quedar habilitado al menos un medio de pago.' });
+  try {
+    await db.query(
+      `INSERT INTO configuracion_tienda
+       (id, nombre, telefono, email, direccion, localidad, descripcion, horario, condiciones_venta,
+        envio_habilitado, costo_envio_base, pago_credito_activo, pago_debito_activo, pago_rapipago_activo)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE nombre=VALUES(nombre), telefono=VALUES(telefono), email=VALUES(email),
+        direccion=VALUES(direccion), localidad=VALUES(localidad), descripcion=VALUES(descripcion), horario=VALUES(horario),
+        condiciones_venta=VALUES(condiciones_venta), envio_habilitado=VALUES(envio_habilitado), costo_envio_base=VALUES(costo_envio_base),
+        pago_credito_activo=VALUES(pago_credito_activo), pago_debito_activo=VALUES(pago_debito_activo), pago_rapipago_activo=VALUES(pago_rapipago_activo)`,
+      [datos.nombre, datos.telefono || null, datos.email || null, datos.direccion || null, datos.localidad || null,
+       datos.descripcion || null, datos.horario || null, datos.condiciones || null, datos.envio, datos.costo,
+       datos.credito, datos.debito, datos.rapipago]
+    );
+    res.json({ ok: true, configuracion: await obtenerConfiguracionTienda() });
+  } catch (error) {
+    console.error('Error al guardar configuración de tienda:', error.message);
+    res.status(500).json({ error: 'No se pudo guardar la configuración de la tienda.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Administración de cuentas: la cuenta principal ve a todos; los empleados solo ven los grupos delegados.
+app.get('/api/admin/usuarios', async (req, res) => {
+  const puedeClientes = await verificarPermisoAdmin(req, 'gestionar_usuarios', req.query.adminId);
+  const puedeEmpleados = await verificarPermisoAdmin(req, 'gestionar_empleados', req.query.adminId);
+  const esPrincipal = await verificarPropietario(req);
+  if (!esPrincipal && !puedeClientes && !puedeEmpleados) return res.status(403).json({ error: 'No tenés permiso para consultar cuentas.' });
+  try {
+    let consulta;
+    if (esPrincipal) {
+      consulta = `SELECT id, nombre, email, telefono, rol, activo, creado_en AS creadoEn FROM usuarios ORDER BY creado_en DESC, id DESC`;
+    } else if (puedeClientes && puedeEmpleados) {
+      consulta = `SELECT id, nombre, email, telefono, rol, activo, creado_en AS creadoEn FROM usuarios
+                  WHERE rol = 'cliente' OR (rol = 'admin' AND NOT EXISTS (SELECT 1 FROM propietario_sistema ps WHERE ps.usuario_id = usuarios.id))
+                  ORDER BY creado_en DESC, id DESC`;
+    } else if (puedeEmpleados) {
+      consulta = `SELECT id, nombre, email, telefono, rol, activo, creado_en AS creadoEn FROM usuarios
+                  WHERE rol = 'admin' AND NOT EXISTS (SELECT 1 FROM propietario_sistema ps WHERE ps.usuario_id = usuarios.id)
+                  ORDER BY creado_en DESC, id DESC`;
+    } else {
+      consulta = `SELECT id, nombre, email, telefono, rol, activo, creado_en AS creadoEn FROM usuarios WHERE rol = 'cliente' ORDER BY creado_en DESC, id DESC`;
+    }
+    const [usuarios] = await db.query(consulta);
+    res.json(usuarios);
+  } catch (error) {
+    console.error('Error al listar usuarios:', error.message);
+    res.status(500).json({ error: 'No se pudieron consultar los usuarios.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.patch('/api/admin/usuarios/:id/estado', async (req, res) => {
+  const adminId = Number(req.body?.adminId);
+  const id = Number(req.params.id);
+  const puedeClientes = await verificarPermisoAdmin(req, 'gestionar_usuarios', adminId);
+  const puedeEmpleados = await verificarPermisoAdmin(req, 'gestionar_empleados', adminId);
+  const esPrincipal = await verificarPropietario(req);
+  if (!esPrincipal && !puedeClientes && !puedeEmpleados) return res.status(403).json({ error: 'No tenés permiso para administrar cuentas.' });
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID de usuario no es válido.' });
+  const activo = req.body?.activo === true || Number(req.body?.activo) === 1 ? 1 : 0;
+  if (id === adminId && !activo) return res.status(400).json({ error: 'No podés desactivar tu propia cuenta.' });
+  try {
+    const [[actual]] = await db.query('SELECT u.rol, EXISTS(SELECT 1 FROM propietario_sistema ps WHERE ps.usuario_id = u.id) AS esPropietario FROM usuarios u WHERE u.id = ? LIMIT 1', [id]);
+    if (!actual) return res.status(404).json({ error: 'No se encontró la cuenta.' });
+    if (Number(actual.esPropietario) === 1) return res.status(403).json({ error: 'La cuenta principal no se puede deshabilitar desde la aplicación.' });
+    if (actual.rol === 'admin' && !esPrincipal && !puedeEmpleados) return res.status(403).json({ error: 'Solo la cuenta principal o un empleado autorizado para gestionar empleados puede modificar otra cuenta administradora.' });
+    if (actual.rol === 'cliente' && !esPrincipal && !puedeClientes) return res.status(403).json({ error: 'No tenés permiso para modificar cuentas de clientes.' });
+    const [resultado] = await db.query('UPDATE usuarios SET activo = ? WHERE id = ?', [activo, id]);
+    if (!resultado.affectedRows) return res.status(404).json({ error: 'No se encontró la cuenta.' });
+    if (!activo) revocarSesionesUsuario(id);
+    res.json({ ok: true, id, activo: Boolean(activo) });
+  } catch (error) {
+    console.error('Error al cambiar estado de usuario:', error.message);
+    res.status(500).json({ error: 'No se pudo modificar el estado de la cuenta.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Devuelve un pedido solo cuando coinciden el ID del usuario y el ID del pedido.
+app.get('/api/usuarios/:id/pedidos/:pedidoId', async (req, res) => {
+  const usuarioId = Number(req.params.id);
+  if (!verificarSesionPropia(req, usuarioId)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  const pedidoId = Number(req.params.pedidoId);
+  if (!Number.isInteger(usuarioId) || usuarioId <= 0 || !Number.isInteger(pedidoId) || pedidoId <= 0) {
+    return res.status(400).json({ error: 'El ID de usuario o de pedido no es válido.' });
+  }
+  try {
+    const [[pedido]] = await db.query(
+      `SELECT v.id, v.id AS pedidoId, v.usuario_id AS usuarioId, v.numero, v.fecha,
+              v.subtotal, v.descuento, v.costo_envio AS costoEnvio, v.total,
+              v.metodo_pago AS metodoPago, v.estado, v.estado_pedido AS estadoPedido,
+              v.codigo_rapipago AS codigoRapipago, v.con_envio AS conEnvio,
+              v.direccion_envio AS direccion, v.localidad_envio AS localidad,
+              v.distancia_km AS distanciaKm
+       FROM ventas v WHERE v.usuario_id = ? AND v.id = ? LIMIT 1`,
+      [usuarioId, pedidoId]
+    );
+    if (!pedido) return res.status(404).json({ error: 'No se encontró ese pedido dentro de tu cuenta.' });
+    const [items] = await db.query(
+      `SELECT dv.producto_id AS id, p.nombre, dv.cantidad, dv.precio_unitario AS precio
+       FROM detalle_ventas dv INNER JOIN productos p ON p.id = dv.producto_id
+       WHERE dv.venta_id = ? ORDER BY dv.id`, [pedidoId]
+    );
+    pedido.items = items.map((item) => ({ ...item, cantidad: Number(item.cantidad), precio: Number(item.precio) }));
+    pedido.total = Number(pedido.total);
+    pedido.subtotal = Number(pedido.subtotal);
+    pedido.descuento = Number(pedido.descuento);
+    pedido.costoEnvio = Number(pedido.costoEnvio);
+    pedido.inicio = pedido.fecha ? new Date(pedido.fecha).getTime() : Date.now();
+    pedido.numero = pedido.numero || pedido.id;
+    pedido.estado = pedido.estadoPedido || pedido.estado;
+    pedido.conEnvio = Boolean(Number(pedido.conEnvio));
+    res.json(pedido);
+  } catch (error) {
+    console.error('Error al consultar el pedido individual:', error.message);
+    res.status(500).json({ error: 'No se pudo consultar el pedido.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// El usuario consulta sus compras: el historial ahora se conserva en MySQL y no solamente en el celular.
+app.get('/api/usuarios/:id/pedidos', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!verificarSesionPropia(req, id)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID de usuario no es válido.' });
+  try {
+    const [[preferenciasUsuario]] = await db.query(
+      'SELECT notificaciones_activas FROM usuarios WHERE id = ? AND activo = 1', [id]
+    );
+    if (!preferenciasUsuario) return res.status(404).json({ error: 'No se encontró la cuenta.' });
+    const [ventas] = await db.query(
+      `SELECT id, id AS pedidoId, usuario_id AS usuarioId, numero, fecha, subtotal, descuento, costo_envio, total, metodo_pago AS metodoPago,
+              estado, estado_pedido AS estadoPedido, codigo_rapipago AS codigoRapipago,
+              con_envio AS conEnvio, direccion_envio AS direccion, localidad_envio AS localidad, distancia_km AS distanciaKm
+       FROM ventas WHERE usuario_id = ? ORDER BY fecha DESC, id DESC`, [id]
+    );
+    for (const venta of ventas) {
+      venta.notificacionesActivas = Boolean(Number(preferenciasUsuario.notificaciones_activas));
+      const [items] = await db.query(
+        `SELECT dv.producto_id AS id, p.nombre, dv.cantidad, dv.precio_unitario AS precio
+         FROM detalle_ventas dv INNER JOIN productos p ON p.id = dv.producto_id WHERE dv.venta_id = ?`, [venta.id]
+      );
+      venta.items = items;
+      venta.total = Number(venta.total);
+      venta.subtotal = Number(venta.subtotal);
+      venta.descuento = Number(venta.descuento);
+      venta.costo_envio = Number(venta.costo_envio);
+      venta.distanciaKm = venta.distanciaKm == null ? null : Number(venta.distanciaKm);
+      venta.inicio = new Date(venta.fecha).getTime();
+      venta.numero = venta.numero || venta.id;
+      venta.estado = venta.estadoPedido;
+      venta.conEnvio = Boolean(Number(venta.conEnvio));
+    }
+    res.json(ventas);
+  } catch (error) {
+    console.error('Error al consultar pedidos:', error.message);
+    res.status(500).json({ error: 'No se pudo consultar el historial de pedidos.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Confirma una compra y la guarda en ventas + detalle_ventas dentro de una transacción.
+// Los precios se leen nuevamente desde MySQL para que el total no dependa del celular.
+app.post('/api/ventas', async (req, res) => {
+  const usuarioId = Number(req.body?.usuarioId);
+  if (!verificarSesionPropia(req, usuarioId)) return res.status(401).json({ error: 'La sesión no corresponde a la cuenta que intenta comprar.' });
+  const metodoPago = String(req.body?.metodoPago || '');
+  const conEnvio = Boolean(req.body?.conEnvio);
+  const direccion = String(req.body?.direccion || '').trim();
+  const localidad = String(req.body?.localidad || '').trim();
+  const distanciaKm = req.body?.distanciaKm == null ? null : Number(req.body.distanciaKm);
+  const costoEnvioSolicitado = Number(req.body?.costoEnvio || 0);
+  const codigoRapipago = String(req.body?.codigoRapipago || '').trim();
+  const codigoCupon = String(req.body?.codigoCupon || '').trim().toUpperCase();
+  const itemsEntrada = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!Number.isInteger(usuarioId) || usuarioId <= 0 || !METODOS_PAGO_VALIDOS.includes(metodoPago) || itemsEntrada.length < 1 || itemsEntrada.length > 40) {
+    return res.status(400).json({ error: 'Faltan datos de la compra o no son válidos.' });
+  }
+  if (conEnvio && (!direccion || !localidad || direccion.length > 200 || localidad.length > 100 || !Number.isFinite(distanciaKm) || distanciaKm < 0)) {
+    return res.status(400).json({ error: 'Completá una dirección, localidad y distancia de envío válidas.' });
+  }
+  if (!Number.isFinite(costoEnvioSolicitado) || costoEnvioSolicitado < 0 || costoEnvioSolicitado > 100000) return res.status(400).json({ error: 'El costo de envío no es válido.' });
+  let conexion;
+  try {
+    const [[usuario]] = await db.query('SELECT id FROM usuarios WHERE id = ? AND activo = 1', [usuarioId]);
+    if (!usuario) return res.status(404).json({ error: 'La cuenta no existe o está desactivada.' });
+    const tienda = await obtenerConfiguracionTienda();
+    if (!tienda.metodosPago[metodoPago]) return res.status(400).json({ error: 'Ese medio de pago no está habilitado por la tienda.' });
+    if (conEnvio && !tienda.envioHabilitado) return res.status(400).json({ error: 'La tienda no tiene habilitados los envíos a domicilio.' });
+
+    conexion = await db.getConnection();
+    await conexion.beginTransaction();
+    let subtotal = 0;
+    const detalle = [];
+    for (const item of itemsEntrada) {
+      const productoId = Number(item.id);
+      const cantidad = Number(item.cantidad);
+      if (!Number.isInteger(productoId) || productoId <= 0 || !Number.isInteger(cantidad) || cantidad <= 0 || cantidad > 100) {
+        throw new Error('Uno de los productos o cantidades no es válido.');
+      }
+      const [[producto]] = await conexion.query('SELECT id, nombre, precio FROM productos WHERE id = ? AND activo = 1', [productoId]);
+      if (!producto) throw new Error(`El producto ${productoId} ya no está disponible.`);
+      const precio = Number(producto.precio);
+      subtotal += precio * cantidad;
+      detalle.push({ id: producto.id, nombre: producto.nombre, cantidad, precio });
+    }
+
+    let cuponId = null;
+    let descuento = 0;
+    let envio = conEnvio ? costoEnvioSolicitado : 0;
+    if (codigoCupon) {
+      const [[cupon]] = await conexion.query(
+        `SELECT id, tipo, valor FROM cupones
+         WHERE codigo = ? AND activo = 1 AND (vence_en IS NULL OR vence_en >= CURDATE()) LIMIT 1`, [codigoCupon]
+      );
+      if (!cupon) throw new Error('El cupón no existe, está desactivado o venció.');
+      cuponId = cupon.id;
+      if (cupon.tipo === 'porcentaje') descuento = Math.round(subtotal * Number(cupon.valor) / 100);
+      else if (cupon.tipo === 'monto') descuento = Math.min(Number(cupon.valor), subtotal);
+      else if (cupon.tipo === 'envioGratis') {
+        if (!conEnvio) throw new Error('El cupón de envío gratis requiere envío a domicilio.');
+        envio = 0;
+      }
+    }
+    const total = Math.max(0, subtotal - descuento + envio);
+    const estadoPago = metodoPago === 'rapipago' ? 'pendiente' : 'pagada';
+    const numero = `DL-${Date.now().toString().slice(-12)}`;
+    const [resultado] = await conexion.query(
+      `INSERT INTO ventas
+       (numero, usuario_id, cupon_id, subtotal, descuento, costo_envio, total, metodo_pago, estado, estado_pedido,
+        codigo_rapipago, con_envio, direccion_envio, localidad_envio, distancia_km)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmado', ?, ?, ?, ?, ?)`,
+      [numero, usuarioId, cuponId, subtotal, descuento, envio, total, metodoPago, estadoPago,
+       codigoRapipago || null, conEnvio ? 1 : 0, conEnvio ? direccion : null, conEnvio ? localidad : null, conEnvio ? distanciaKm : null]
+    );
+    for (const item of detalle) {
+      await conexion.query(
+        'INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario) VALUES (?, ?, ?, ?)',
+        [resultado.insertId, item.id, item.cantidad, item.precio]
+      );
+    }
+    await conexion.commit();
+    res.status(201).json({
+      id: resultado.insertId, pedidoId: resultado.insertId, usuarioId, numero, inicio: Date.now(), subtotal, descuento, costoEnvio: envio, total,
+      metodoPago, estado: 'confirmado', estadoPedido: 'confirmado', estadoPago, codigoRapipago: codigoRapipago || null,
+      conEnvio, direccion: conEnvio ? direccion : null, localidad: conEnvio ? localidad : null,
+      distanciaKm: conEnvio ? distanciaKm : null, items: detalle,
+    });
+  } catch (error) {
+    if (conexion) await conexion.rollback().catch(() => {});
+    console.error('Error al registrar venta:', error.code || '', error.message);
+    res.status(error.code ? 500 : 400).json({
+      error: error.code ? 'No se pudo guardar la compra en MySQL. Revisá que estén aplicadas las migraciones de pedidos y configuraciones.' : (error.message || 'No se pudo registrar la compra.'),
+    });
+  } finally {
+    conexion?.release();
+  }
+});
+
+// Administración de pedidos/ventas y cambio del estado logístico.
+app.get('/api/admin/ventas', async (req, res) => {
+  if (!await verificarPermisoAdmin(req, 'gestionar_pedidos', req.query.adminId)) return res.status(403).json({ error: 'Se requiere una cuenta administradora activa.' });
+  try {
+    const [ventas] = await db.query(
+      `SELECT v.id, v.numero, v.fecha, v.usuario_id AS usuarioId, u.nombre AS nombreUsuario, u.email,
+              v.subtotal, v.descuento, v.costo_envio AS costoEnvio, v.total, v.metodo_pago AS metodoPago,
+              v.estado AS estadoPago, v.estado_pedido AS estadoPedido, v.codigo_rapipago AS codigoRapipago,
+              v.con_envio AS conEnvio, v.direccion_envio AS direccion, v.localidad_envio AS localidad
+       FROM ventas v INNER JOIN usuarios u ON u.id = v.usuario_id ORDER BY v.fecha DESC, v.id DESC LIMIT 300`
+    );
+    for (const venta of ventas) {
+      const [items] = await db.query(
+        `SELECT dv.producto_id AS id, p.nombre, dv.cantidad, dv.precio_unitario AS precio
+         FROM detalle_ventas dv INNER JOIN productos p ON p.id = dv.producto_id WHERE dv.venta_id = ?`, [venta.id]
+      );
+      venta.items = items;
+      venta.total = Number(venta.total);
+      venta.conEnvio = Boolean(Number(venta.conEnvio));
+    }
+    res.json(ventas);
+  } catch (error) {
+    console.error('Error al listar ventas:', error.message);
+    res.status(500).json({ error: 'No se pudieron consultar los pedidos y ventas.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.patch('/api/admin/ventas/:id/estado', async (req, res) => {
+  const id = Number(req.params.id);
+  const adminId = Number(req.body?.adminId);
+  const estadoPedido = String(req.body?.estadoPedido || '');
+  if (!await verificarPermisoAdmin(req, 'gestionar_pedidos', adminId)) return res.status(403).json({ error: 'Se requiere una cuenta administradora activa.' });
+  if (!Number.isInteger(id) || id <= 0 || !ESTADOS_PEDIDO_VALIDOS.includes(estadoPedido)) return res.status(400).json({ error: 'El pedido o estado no es válido.' });
+  try {
+    const [resultado] = estadoPedido === 'cancelado'
+      ? await db.query("UPDATE ventas SET estado_pedido = ?, estado = 'cancelada' WHERE id = ?", [estadoPedido, id])
+      : await db.query('UPDATE ventas SET estado_pedido = ? WHERE id = ?', [estadoPedido, id]);
+    if (!resultado.affectedRows) return res.status(404).json({ error: 'No se encontró el pedido.' });
+    res.json({ ok: true, id, estadoPedido });
+  } catch (error) {
+    console.error('Error al actualizar estado del pedido:', error.message);
+    res.status(500).json({ error: 'No se pudo actualizar el estado del pedido.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Indicadores operativos basados exclusivamente en las ventas guardadas en MySQL.
+app.get('/api/admin/reportes', async (req, res) => {
+  if (!await verificarPermisoAdmin(req, 'ver_reportes', req.query.adminId)) return res.status(403).json({ error: 'Se requiere una cuenta administradora activa.' });
+  try {
+    const [[resumen]] = await db.query(
+      `SELECT COUNT(*) AS cantidadPedidos, COALESCE(SUM(CASE WHEN estado = 'pagada' THEN total ELSE 0 END), 0) AS totalVendido,
+              COALESCE(SUM(CASE WHEN estado_pedido NOT IN ('entregado','cancelado') THEN 1 ELSE 0 END), 0) AS pedidosAbiertos,
+              COUNT(DISTINCT usuario_id) AS clientes
+       FROM ventas`
+    );
+    const [[productos]] = await db.query('SELECT COUNT(*) AS productosActivos FROM productos WHERE activo = 1');
+    const [estados] = await db.query('SELECT estado_pedido AS estado, COUNT(*) AS cantidad FROM ventas GROUP BY estado_pedido ORDER BY cantidad DESC');
+    const [masVendidos] = await db.query(
+      `SELECT p.nombre, SUM(dv.cantidad) AS unidades, SUM(dv.cantidad * dv.precio_unitario) AS importe
+       FROM detalle_ventas dv INNER JOIN productos p ON p.id = dv.producto_id
+       INNER JOIN ventas v ON v.id = dv.venta_id WHERE v.estado <> 'cancelada'
+       GROUP BY p.id, p.nombre ORDER BY unidades DESC LIMIT 5`
+    );
+    res.json({
+      cantidadPedidos: Number(resumen.cantidadPedidos), totalVendido: Number(resumen.totalVendido),
+      pedidosAbiertos: Number(resumen.pedidosAbiertos), clientes: Number(resumen.clientes),
+      productosActivos: Number(productos.productosActivos), estados, masVendidos,
+    });
+  } catch (error) {
+    console.error('Error al generar reportes:', error.message);
+    res.status(500).json({ error: 'No se pudieron generar los reportes.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// INVENTARIO, RECETAS Y SOLICITUDES DE COMPRA A PROVEEDORES.
+app.get('/api/admin/insumos', async (req, res) => {
+  const adminId = req.query.adminId;
+  const puedeInventario = await verificarPermisoAdmin(req, 'gestionar_insumos', adminId);
+  const puedeComprar = await verificarPermisoAdmin(req, 'solicitar_compras', adminId);
+  if (!puedeInventario && !puedeComprar) return res.status(403).json({ error: 'No tenés permiso para consultar inventario o compras.' });
+  try {
+    const [insumos] = await db.query(`SELECT id, nombre, unidad, stock_actual AS stockActual,
+      stock_minimo AS stockMinimo, proveedor, activo FROM insumos WHERE activo = 1 ORDER BY nombre`);
+    const [productos] = await db.query('SELECT id, nombre FROM productos WHERE activo = 1 ORDER BY nombre');
+    const [recetas] = await db.query(`SELECT rp.producto_id AS productoId, p.nombre AS productoNombre,
+      rp.insumo_id AS insumoId, i.nombre AS insumoNombre, i.unidad,
+      rp.cantidad_por_producto AS cantidadPorProducto
+      FROM recetas_productos rp INNER JOIN productos p ON p.id = rp.producto_id
+      INNER JOIN insumos i ON i.id = rp.insumo_id ORDER BY p.nombre, i.nombre`);
+    const [compras] = await db.query(`SELECT id, numero, proveedor, estado, notas, creado_en AS creadoEn
+      FROM compras_insumos ORDER BY creado_en DESC, id DESC LIMIT 40`);
+    for (const compra of compras) {
+      const [items] = await db.query(`SELECT d.insumo_id AS insumoId, i.nombre, i.unidad, d.cantidad
+        FROM detalle_compras_insumos d INNER JOIN insumos i ON i.id = d.insumo_id
+        WHERE d.compra_id = ? ORDER BY d.id`, [compra.id]);
+      compra.items = items.map((x) => ({ ...x, cantidad: Number(x.cantidad) }));
+    }
+    res.json({ insumos: insumos.map((x) => ({ ...x, stockActual: Number(x.stockActual), stockMinimo: Number(x.stockMinimo) })), productos, recetas: recetas.map((x) => ({ ...x, cantidadPorProducto: Number(x.cantidadPorProducto) })), compras });
+  } catch (error) {
+    console.error('Error al consultar insumos:', error.message);
+    res.status(500).json({ error: 'No se pudo consultar el inventario. Aplicá la migración de insumos.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.post('/api/admin/insumos', async (req, res) => {
+  const adminId = Number(req.body?.adminId);
+  if (!await verificarPermisoAdmin(req, 'gestionar_insumos', adminId)) return res.status(403).json({ error: 'No tenés permiso para registrar materias primas.' });
+  const nombre = String(req.body?.nombre || '').trim();
+  const unidad = String(req.body?.unidad || 'unidad').trim();
+  const stockActual = Number(req.body?.stockActual || 0);
+  const stockMinimo = Number(req.body?.stockMinimo || 0);
+  const proveedor = String(req.body?.proveedor || '').trim();
+  if (!nombre || nombre.length > 120 || !unidad || unidad.length > 20 || !Number.isFinite(stockActual) || stockActual < 0 || !Number.isFinite(stockMinimo) || stockMinimo < 0 || proveedor.length > 150) {
+    return res.status(400).json({ error: 'Revisá el nombre, la unidad, las cantidades y el proveedor.' });
+  }
+  try {
+    const [resultado] = await db.query('INSERT INTO insumos (nombre, unidad, stock_actual, stock_minimo, proveedor) VALUES (?, ?, ?, ?, ?)', [nombre, unidad, stockActual, stockMinimo, proveedor || null]);
+    res.status(201).json({ id: resultado.insertId, nombre, unidad, stockActual, stockMinimo, proveedor });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Ya existe una materia prima con ese nombre.' });
+    console.error('Error al crear insumo:', error.message);
+    res.status(500).json({ error: 'No se pudo registrar el insumo.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.post('/api/admin/insumos/recetas', async (req, res) => {
+  const adminId = Number(req.body?.adminId);
+  if (!await verificarPermisoAdmin(req, 'gestionar_insumos', adminId)) return res.status(403).json({ error: 'No tenés permiso para definir las materias primas de los productos.' });
+  const productoId = Number(req.body?.productoId);
+  const insumoId = Number(req.body?.insumoId);
+  const cantidad = Number(req.body?.cantidadPorProducto);
+  if (!Number.isInteger(productoId) || productoId <= 0 || !Number.isInteger(insumoId) || insumoId <= 0 || !Number.isFinite(cantidad) || cantidad <= 0) {
+    return res.status(400).json({ error: 'Elegí un producto, una materia prima y una cantidad mayor a cero.' });
+  }
+  try {
+    await db.query(`INSERT INTO recetas_productos (producto_id, insumo_id, cantidad_por_producto) VALUES (?, ?, ?)
+      ON DUPLICATE KEY UPDATE cantidad_por_producto = VALUES(cantidad_por_producto)`, [productoId, insumoId, cantidad]);
+    res.json({ ok: true, productoId, insumoId, cantidadPorProducto: cantidad });
+  } catch (error) {
+    console.error('Error al guardar receta:', error.message);
+    res.status(500).json({ error: 'No se pudo guardar la necesidad del producto. Comprobá que el producto y el insumo existan.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.post('/api/admin/compras-insumos', async (req, res) => {
+  const adminId = Number(req.body?.adminId);
+  if (!await verificarPermisoAdmin(req, 'solicitar_compras', adminId)) return res.status(403).json({ error: 'No tenés permiso para solicitar compras grandes.' });
+  const proveedor = String(req.body?.proveedor || '').trim();
+  const notas = String(req.body?.notas || '').trim();
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!proveedor || proveedor.length > 150 || notas.length > 500 || items.length < 1 || items.length > 50) return res.status(400).json({ error: 'Indicá un proveedor y entre 1 y 50 materias primas.' });
+  const normalizados = items.map((item) => ({ insumoId: Number(item.insumoId), cantidad: Number(item.cantidad) }));
+  if (normalizados.some((item) => !Number.isInteger(item.insumoId) || item.insumoId <= 0 || !Number.isFinite(item.cantidad) || item.cantidad <= 0)) return res.status(400).json({ error: 'Todas las cantidades de compra deben ser mayores a cero.' });
+  const conexion = await db.getConnection();
+  try {
+    await conexion.beginTransaction();
+    for (const item of normalizados) {
+      const [[existe]] = await conexion.query('SELECT id FROM insumos WHERE id = ? AND activo = 1', [item.insumoId]);
+      if (!existe) throw new Error(`No existe el insumo con ID ${item.insumoId}.`);
+    }
+    const numero = `INS-${Date.now()}`;
+    const [cabecera] = await conexion.query(`INSERT INTO compras_insumos (numero, proveedor, estado, notas, creado_por_usuario_id)
+      VALUES (?, ?, 'solicitado', ?, ?)`, [numero, proveedor, notas || null, adminId]);
+    for (const item of normalizados) await conexion.query('INSERT INTO detalle_compras_insumos (compra_id, insumo_id, cantidad) VALUES (?, ?, ?)', [cabecera.insertId, item.insumoId, item.cantidad]);
+    await conexion.commit();
+    res.status(201).json({ ok: true, id: cabecera.insertId, numero, estado: 'solicitado' });
+  } catch (error) {
+    await conexion.rollback();
+    console.error('Error al crear compra de insumos:', error.message);
+    res.status(500).json({ error: error.message || 'No se pudo crear la solicitud de compra.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  } finally { conexion.release(); }
+});
+
+app.patch('/api/admin/compras-insumos/:id/estado', async (req, res) => {
+  const adminId = Number(req.body?.adminId);
+  if (!await verificarPermisoAdmin(req, 'solicitar_compras', adminId)) return res.status(403).json({ error: 'No tenés permiso para actualizar compras de insumos.' });
+  const id = Number(req.params.id);
+  const nuevoEstado = String(req.body?.estado || '');
+  if (!Number.isInteger(id) || id <= 0 || !['recibido', 'cancelado'].includes(nuevoEstado)) return res.status(400).json({ error: 'El pedido o estado no es válido.' });
+  const conexion = await db.getConnection();
+  try {
+    await conexion.beginTransaction();
+    const [[compra]] = await conexion.query('SELECT id, estado FROM compras_insumos WHERE id = ? FOR UPDATE', [id]);
+    if (!compra) { await conexion.rollback(); return res.status(404).json({ error: 'No se encontró la solicitud de compra.' }); }
+    if (compra.estado === 'recibido') { await conexion.rollback(); return res.status(409).json({ error: 'La compra ya fue recibida y el stock ya se actualizó.' }); }
+    if (compra.estado === 'cancelado') { await conexion.rollback(); return res.status(409).json({ error: 'La compra ya está cancelada.' }); }
+    if (nuevoEstado === 'recibido') {
+      const [items] = await conexion.query('SELECT insumo_id, cantidad FROM detalle_compras_insumos WHERE compra_id = ?', [id]);
+      for (const item of items) await conexion.query('UPDATE insumos SET stock_actual = stock_actual + ? WHERE id = ?', [item.cantidad, item.insumo_id]);
+    }
+    await conexion.query('UPDATE compras_insumos SET estado = ? WHERE id = ?', [nuevoEstado, id]);
+    await conexion.commit();
+    res.json({ ok: true, id, estado: nuevoEstado, stockActualizado: nuevoEstado === 'recibido' });
+  } catch (error) {
+    await conexion.rollback();
+    console.error('Error al cambiar estado de compra de insumos:', error.message);
+    res.status(500).json({ error: 'No se pudo actualizar la compra.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  } finally { conexion.release(); }
+});
+
 // Registro de cuentas.
 app.post('/api/auth/registro', async (req, res) => {
   const cuerpo = req.body && typeof req.body === 'object' ? req.body : {};
   const nombre = typeof cuerpo.nombre === 'string' ? cuerpo.nombre.trim() : '';
   const mail = typeof cuerpo.email === 'string' ? cuerpo.email.trim().toLowerCase() : '';
+  const telefono = typeof cuerpo.telefono === 'string' ? cuerpo.telefono.trim() : '';
   const password = typeof cuerpo.password === 'string' ? cuerpo.password : '';
   const rol = typeof cuerpo.rol === 'string' ? cuerpo.rol.trim().toLowerCase() : 'cliente';
   const codigoAutorizacion = typeof cuerpo.codigoAutorizacion === 'string'
@@ -287,8 +1261,8 @@ app.post('/api/auth/registro', async (req, res) => {
     : '';
   const claveUnica = typeof cuerpo.claveUnica === 'string' ? cuerpo.claveUnica.trim() : '';
 
-  if (!nombre || nombre.length > 100 || !/^\S+@\S+\.\S+$/.test(mail) || mail.length > 150 || password.length < 6) {
-    return res.status(400).json({ error: 'Revisá nombre, correo y contraseña (mínimo 6 caracteres). Verificá también que el nombre y el correo no sean demasiado largos.' });
+  if (!nombre || nombre.length > 100 || !/^\S+@\S+\.\S+$/.test(mail) || mail.length > 150 || password.length < 6 || telefono.length > 30) {
+    return res.status(400).json({ error: 'Revisá nombre, correo, teléfono y contraseña (mínimo 6 caracteres).' });
   }
   if (!['cliente', 'admin'].includes(rol)) {
     return res.status(400).json({ error: 'El tipo de cuenta seleccionado no es válido.' });
@@ -305,13 +1279,12 @@ app.post('/api/auth/registro', async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 12);
     const claveUnicaHash = rol === 'admin' ? await bcrypt.hash(claveUnica, 12) : null;
     const [resultado] = await db.query(
-      'INSERT INTO usuarios (nombre, email, password_hash, rol, clave_unica_hash) VALUES (?, ?, ?, ?, ?)',
-      [nombre, mail, passwordHash, rol, claveUnicaHash]
+      'INSERT INTO usuarios (nombre, email, telefono, password_hash, rol, clave_unica_hash) VALUES (?, ?, ?, ?, ?, ?)',
+      [nombre, mail, telefono || null, passwordHash, rol, claveUnicaHash]
     );
     console.log(`Cuenta creada correctamente: usuario ID ${resultado.insertId} (${rol}).`);
-    return res.status(201).json({ id: resultado.insertId, nombre, email: mail, rol });
+    return res.status(201).json({ id: resultado.insertId, nombre, email: mail, telefono, fotoPerfilUrl: '', rol });
   } catch (error) {
-    // El mensaje completo queda en la terminal para identificar problemas reales de esquema o conexión.
     console.error('Error al registrar usuario:', {
       code: error.code,
       errno: error.errno,
@@ -326,11 +1299,10 @@ app.post('/api/auth/registro', async (req, res) => {
     if (error.code === 'ER_NO_SUCH_TABLE') {
       mensaje = 'No existe la tabla usuarios en la base de datos configurada. Verificá DB_NAME y la importación del SQL.';
     } else if (error.code === 'ER_BAD_FIELD_ERROR') {
-      mensaje = 'La tabla usuarios no tiene todas las columnas que necesita el registro. Compará su estructura con database/dulces_lucho.sql.';
+      mensaje = 'A la tabla usuarios le falta una columna necesaria. Ejecutá la migración de perfil y banners.';
     } else if (error.code === 'ECONNREFUSED' || error.code === 'PROTOCOL_CONNECTION_LOST') {
-      mensaje = 'El backend no puede conectarse con MySQL. Revisá que MySQL esté iniciado en XAMPP y los datos de backend/.env.';
+      mensaje = 'El backend no puede conectarse con MySQL. Revisá XAMPP y backend/.env.';
     }
-
     return res.status(500).json({
       error: mensaje,
       detalle: process.env.NODE_ENV === 'production' ? undefined : (error.sqlMessage || error.message),
@@ -338,31 +1310,202 @@ app.post('/api/auth/registro', async (req, res) => {
   }
 });
 
-// Inicio de sesión.
+// Verifica la identidad antes de permitir cambiar correo o contraseña.
+// Los clientes confirman su contraseña actual; los administradores también ingresan
+// el código general de administración y su clave personal de seis números.
+app.post('/api/auth/verificar-proteccion-cuenta', async (req, res) => {
+  const id = Number(req.body?.usuarioId);
+  if (!verificarSesionPropia(req, id)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  const passwordActual = String(req.body?.passwordActual || '');
+  const codigoAdmin = String(req.body?.codigoAdmin || '').trim();
+  const claveUnica = String(req.body?.claveUnica || '').trim();
+  if (!Number.isInteger(id) || id <= 0 || !passwordActual) {
+    return res.status(400).json({ error: 'Ingresá tu contraseña actual para continuar.' });
+  }
+  const llaveIntentos = `${req.ip || 'local'}:${id}`;
+  const estadoIntentos = intentosProteccionCuenta.get(llaveIntentos);
+  if (estadoIntentos?.bloqueadoHasta > Date.now()) {
+    const faltan = Math.ceil((estadoIntentos.bloqueadoHasta - Date.now()) / 60000);
+    return res.status(429).json({ error: `Por seguridad, esperá aproximadamente ${faltan} minuto(s) antes de volver a intentar.` });
+  }
+  try {
+    const [[usuario]] = await db.query(
+      'SELECT id, rol, password_hash, clave_unica_hash, activo FROM usuarios WHERE id = ? AND activo = 1 LIMIT 1', [id]
+    );
+    let correcto = Boolean(usuario && await bcrypt.compare(passwordActual, usuario.password_hash));
+    if (correcto && usuario.rol === 'admin') {
+      const codigoConfigurado = String(process.env.ADMIN_REGISTRATION_CODE || '').trim();
+      correcto = Boolean(codigoConfigurado && codigoAdmin === codigoConfigurado && /^\d{6}$/.test(claveUnica)
+        && usuario.clave_unica_hash && await bcrypt.compare(claveUnica, usuario.clave_unica_hash));
+    }
+    if (!correcto) {
+      const intentos = (estadoIntentos?.cantidad || 0) + 1;
+      intentosProteccionCuenta.set(llaveIntentos, {
+        cantidad: intentos,
+        bloqueadoHasta: intentos >= 5 ? Date.now() + 10 * 60 * 1000 : 0,
+      });
+      return res.status(401).json({ error: usuario?.rol === 'admin'
+        ? 'No se pudo verificar la cuenta. Revisá la contraseña, el código de administración y tu clave personal.'
+        : 'La contraseña actual es incorrecta.' });
+    }
+    intentosProteccionCuenta.delete(llaveIntentos);
+    const ahora = Date.now();
+    for (const [tokenExistente, datos] of tokensProteccionCuenta) {
+      if (datos.expira <= ahora) tokensProteccionCuenta.delete(tokenExistente);
+    }
+    const token = randomBytes(32).toString('hex');
+    tokensProteccionCuenta.set(token, { usuarioId: id, expira: ahora + 5 * 60 * 1000 });
+    return res.json({ ok: true, token, venceEnSegundos: 300, mensaje: 'Identidad verificada. Podés modificar el correo o la contraseña durante los próximos 5 minutos.' });
+  } catch (error) {
+    console.error('Error en la protección de cuenta:', error.message);
+    return res.status(500).json({ error: 'No se pudo verificar la cuenta.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Actualiza correo y/o contraseña usando un token temporal emitido por la protección de cuenta.
+app.put('/api/usuarios/:id/credenciales', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!verificarSesionPropia(req, id)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  const token = String(req.headers['x-proteccion-cuenta'] || req.body?.tokenProteccion || '').trim();
+  const nuevoEmail = String(req.body?.nuevoEmail || '').trim().toLowerCase();
+  const nuevaPassword = String(req.body?.nuevaPassword || '');
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID de usuario no es válido.' });
+  if (!token) return res.status(401).json({ error: 'Falta la verificación de seguridad. Volvé a validar tu identidad.' });
+  const permiso = tokensProteccionCuenta.get(token);
+  if (!permiso || permiso.usuarioId !== id || permiso.expira <= Date.now()) {
+    tokensProteccionCuenta.delete(token);
+    return res.status(401).json({ error: 'La verificación venció o ya fue utilizada. Volvé a verificar tu identidad.' });
+  }
+  if (!nuevoEmail && !nuevaPassword) return res.status(400).json({ error: 'Ingresá un correo nuevo, una contraseña nueva o ambos.' });
+  if (nuevoEmail && (!/^\S+@\S+\.\S+$/.test(nuevoEmail) || nuevoEmail.length > 150)) {
+    return res.status(400).json({ error: 'Ingresá un correo electrónico válido de hasta 150 caracteres.' });
+  }
+  if (nuevaPassword && (nuevaPassword.length < 6 || nuevaPassword.length > 100)) {
+    return res.status(400).json({ error: 'La nueva contraseña debe tener entre 6 y 100 caracteres.' });
+  }
+  try {
+    const [[usuario]] = await db.query('SELECT id, email FROM usuarios WHERE id = ? AND activo = 1', [id]);
+    if (!usuario) return res.status(404).json({ error: 'No se encontró una cuenta activa.' });
+    const cambios = [];
+    const valores = [];
+    if (nuevoEmail && nuevoEmail !== String(usuario.email || '').toLowerCase()) {
+      cambios.push('email = ?'); valores.push(nuevoEmail);
+    }
+    if (nuevaPassword) {
+      cambios.push('password_hash = ?'); valores.push(await bcrypt.hash(nuevaPassword, 12));
+    }
+    if (!cambios.length) return res.status(400).json({ error: 'El nuevo correo coincide con el actual y no ingresaste otra modificación.' });
+    valores.push(id);
+    await db.query(`UPDATE usuarios SET ${cambios.join(', ')} WHERE id = ? AND activo = 1`, valores);
+    const [[actualizado]] = await db.query('SELECT id, nombre, email, telefono, foto_perfil_url AS fotoPerfilUrl, rol FROM usuarios WHERE id = ?', [id]);
+    tokensProteccionCuenta.delete(token); // El permiso se consume al completar el cambio.
+    return res.json({ ok: true, usuario: { ...actualizado, telefono: actualizado.telefono || '', fotoPerfilUrl: actualizado.fotoPerfilUrl || '' }, mensaje: 'Los datos de acceso se actualizaron correctamente.' });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Ese correo ya está asociado a otra cuenta.' });
+    console.error('Error al actualizar credenciales:', error.message);
+    return res.status(500).json({ error: 'No se pudieron actualizar los datos de acceso.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Inicio de sesión. El token se emite para clientes; los administradores completan la segunda verificación.
 app.post('/api/auth/login', async (req, res) => {
   try {
     const [[usuario]] = await db.query('SELECT * FROM usuarios WHERE email = ? AND activo = 1', [req.body.email?.trim().toLowerCase()]);
     if (!usuario || !await bcrypt.compare(req.body.password || '', usuario.password_hash)) {
       return res.status(401).json({ error: 'Correo o contraseña incorrectos.' });
     }
-    res.json({ id: usuario.id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol, requiereClave: usuario.rol === 'admin' });
+    const datos = await cargarDatosSesion(usuario.id);
+    if (usuario.rol === 'admin') {
+      console.log(`[AUTH] Contraseña de administrador validada. Falta la clave personal para usuario ID ${usuario.id}.`);
+      return res.status(200).json({ ...datos, requiereClave: true });
+    }
+    const sessionToken = crearTokenSesion(usuario.id);
+    return res.json({ ...datos, sessionToken, requiereClave: false });
   } catch (error) {
     console.error('Error al iniciar sesión:', error.message);
-    res.status(500).json({ error: 'No se pudo iniciar sesión.' });
+    res.status(500).json({ error: 'No se pudo iniciar sesión. Verificá que esté aplicada la migración de administración principal.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   }
 });
 
-// Verificación adicional para administradores.
+// Verificación adicional para administradores: solo después de la clave personal se habilita la sesión.
 app.post('/api/auth/verificar-admin', async (req, res) => {
   try {
-    const [[usuario]] = await db.query('SELECT * FROM usuarios WHERE id = ?', [req.body.usuarioId]);
+    const [[usuario]] = await db.query('SELECT * FROM usuarios WHERE id = ? AND activo = 1', [req.body.usuarioId]);
     if (!usuario || usuario.rol !== 'admin' || !await bcrypt.compare(req.body.clave || '', usuario.clave_unica_hash || '')) {
       return res.status(401).json({ error: 'La clave única es incorrecta.' });
     }
-    res.json({ id: usuario.id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol });
+    const datos = await cargarDatosSesion(usuario.id);
+    if (!datos) {
+      console.warn(`[AUTH] Admin ID ${usuario.id}: la cuenta no pudo cargarse después de validar su clave.`);
+      return res.status(401).json({ error: 'La cuenta no está disponible para iniciar sesión.' });
+    }
+
+    // La app espera exactamente la propiedad sessionToken para habilitar la sesión.
+    const sessionToken = crearTokenSesion(usuario.id);
+    console.log(`[AUTH] Verificación de administrador correcta. Sesión segura emitida para usuario ID ${usuario.id}.`);
+    return res.status(200).json({ ...datos, sessionToken, requiereClave: false });
   } catch (error) {
     console.error('Error al verificar administrador:', error.message);
-    res.status(500).json({ error: 'No se pudo verificar el administrador.' });
+    res.status(500).json({ error: 'No se pudo verificar el administrador.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Solo la cuenta propietaria puede consultar empleados y delegar permisos.
+app.get('/api/owner/empleados', async (req, res) => {
+  if (!await verificarPropietario(req)) return res.status(403).json({ error: 'Esta función está reservada a la cuenta principal de Dulces Lucho.' });
+  try {
+    const [empleados] = await db.query(
+      `SELECT u.id, u.nombre, u.email, u.activo, u.permisos_admin_json AS permisosAdminJson,
+              ps.usuario_id IS NOT NULL AS esPropietario
+       FROM usuarios u LEFT JOIN propietario_sistema ps ON ps.usuario_id = u.id
+       WHERE u.rol = 'admin' ORDER BY u.id ASC`
+    );
+    res.json(empleados.filter((e) => !Number(e.esPropietario)).map((e) => ({
+      id: e.id, nombre: e.nombre, email: e.email, activo: Boolean(Number(e.activo)),
+      permisos: parsearPermisos(e.permisosAdminJson),
+    })));
+  } catch (error) {
+    console.error('Error al listar empleados:', error.message);
+    res.status(500).json({ error: 'No se pudieron consultar los empleados.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.put('/api/owner/empleados/:id/permisos', async (req, res) => {
+  if (!await verificarPropietario(req)) return res.status(403).json({ error: 'Solo la cuenta principal puede asignar permisos.' });
+  const id = Number(req.params.id);
+  const permisos = req.body?.permisos;
+  const permitidos = new Set(PERMISOS_ADMIN.map((p) => p.codigo));
+  if (!Number.isInteger(id) || id <= 0 || !Array.isArray(permisos) || permisos.some((p) => !permitidos.has(p))) {
+    return res.status(400).json({ error: 'El empleado o la lista de permisos no es válida.' });
+  }
+  try {
+    const [[empleado]] = await db.query("SELECT id FROM usuarios WHERE id = ? AND rol = 'admin' AND activo = 1 AND NOT EXISTS (SELECT 1 FROM propietario_sistema ps WHERE ps.usuario_id = usuarios.id)", [id]);
+    if (!empleado) return res.status(404).json({ error: 'No se encontró un empleado administrador activo.' });
+    await db.query('UPDATE usuarios SET permisos_admin_json = ? WHERE id = ?', [JSON.stringify([...new Set(permisos)]), id]);
+    res.json({ ok: true, id, permisos: [...new Set(permisos)] });
+  } catch (error) {
+    console.error('Error al asignar permisos:', error.message);
+    res.status(500).json({ error: 'No se pudieron guardar los permisos.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Baja lógica exclusiva de la cuenta propietaria: conserva facturas y trazabilidad de compras anteriores.
+app.delete('/api/owner/usuarios/:id', async (req, res) => {
+  if (!await verificarPropietario(req)) return res.status(403).json({ error: 'Solo la cuenta principal puede dar de baja usuarios.' });
+  const id = Number(req.params.id);
+  const sesion = leerSesion(req);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID no es válido.' });
+  if (id === sesion.usuarioId) return res.status(400).json({ error: 'No podés dar de baja la cuenta principal desde la aplicación.' });
+  try {
+    const [[cuenta]] = await db.query('SELECT id FROM usuarios WHERE id = ? AND NOT EXISTS (SELECT 1 FROM propietario_sistema ps WHERE ps.usuario_id = usuarios.id)', [id]);
+    if (!cuenta) return res.status(404).json({ error: 'No se encontró esa cuenta o es la cuenta principal.' });
+    await db.query("UPDATE usuarios SET activo = 0, permisos_admin_json = '[]' WHERE id = ?", [id]);
+    // Revoca todas las sesiones activas del usuario deshabilitado.
+    revocarSesionesUsuario(id);
+    res.json({ ok: true, id, mensaje: 'Cuenta dada de baja. El historial de pedidos y facturas se conserva.' });
+  } catch (error) {
+    console.error('Error al dar de baja cuenta:', error.message);
+    res.status(500).json({ error: 'No se pudo dar de baja la cuenta.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   }
 });
 
@@ -383,7 +1526,7 @@ app.listen(port, '0.0.0.0', async () => {
   console.log(`API accesible desde la red local en el puerto ${port}`);
   try {
     await db.query(
-      'SELECT id, nombre, email, password_hash, rol, clave_unica_hash, activo FROM usuarios LIMIT 0'
+      'SELECT id, nombre, email, telefono, password_hash, rol, clave_unica_hash, activo FROM usuarios LIMIT 0'
     );
     console.log('MySQL conectado y tabla usuarios verificada.');
   } catch (error) {

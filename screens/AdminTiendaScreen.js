@@ -1,0 +1,62 @@
+// Configuración comercial: datos visibles de la tienda, envíos y métodos de pago habilitados.
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
+
+const VACIO = { nombre: 'Dulces Lucho', telefono: '', email: '', direccion: '', localidad: '', descripcion: '', horario: '', condicionesVenta: '', envioHabilitado: true, costoEnvioBase: 0, metodosPago: { credito: true, debito: true, rapipago: true } };
+export default function AdminTiendaScreen() {
+  const { usuario } = useAuth();
+  const [datos, setDatos] = useState(VACIO);
+  const [cargando, setCargando] = useState(true);
+  const [guardando, setGuardando] = useState(false);
+  useEffect(() => { api('/configuracion-tienda').then((r) => setDatos({ ...VACIO, ...r, metodosPago: { ...VACIO.metodosPago, ...(r.metodosPago || {}) } })).catch((e) => Alert.alert('No se pudo cargar', e.message)).finally(() => setCargando(false)); }, []);
+  const cambiar = (campo, valor) => setDatos((d) => ({ ...d, [campo]: valor }));
+  const cambiarMetodo = (campo, valor) => setDatos((d) => ({ ...d, metodosPago: { ...d.metodosPago, [campo]: valor } }));
+  const guardar = async () => {
+    if (!datos.nombre.trim()) return Alert.alert('Falta el nombre', 'La tienda debe tener un nombre.');
+    if (!Object.values(datos.metodosPago).some(Boolean)) return Alert.alert('Falta un medio de pago', 'Dejá habilitado al menos un método.');
+    setGuardando(true);
+    try {
+      const r = await api('/admin/configuracion-tienda', { method: 'PUT', body: JSON.stringify({ ...datos, adminId: usuario.id, costoEnvioBase: Number(datos.costoEnvioBase || 0) }) });
+      setDatos({ ...VACIO, ...r.configuracion, metodosPago: { ...VACIO.metodosPago, ...(r.configuracion?.metodosPago || {}) } });
+      Alert.alert('Tienda actualizada', 'Los datos, los envíos y los medios de pago quedaron guardados.');
+    } catch (e) { Alert.alert('No se pudo guardar', e.message); }
+    finally { setGuardando(false); }
+  };
+  if (cargando) return <View style={styles.centrado}><ActivityIndicator size="large" color="#A86616" /><Text>Cargando tienda...</Text></View>;
+  return (
+    <ScrollView style={styles.contenedor} contentContainerStyle={styles.contenido} keyboardShouldPersistTaps="handled">
+      <Text style={styles.titulo}>Configuración de la tienda</Text>
+      <Text style={styles.descripcion}>Estos datos se guardan en MySQL y se comparten con todos los clientes.</Text>
+      <View style={styles.tarjeta}>
+        <Text style={styles.subtitulo}>Datos generales</Text>
+        <Campo label="Nombre de la tienda" value={datos.nombre} onChangeText={(v) => cambiar('nombre', v)} />
+        <Campo label="Teléfono de contacto" value={datos.telefono} onChangeText={(v) => cambiar('telefono', v)} keyboardType="phone-pad" />
+        <Campo label="Correo de contacto" value={datos.email} onChangeText={(v) => cambiar('email', v)} keyboardType="email-address" />
+        <Campo label="Dirección del local" value={datos.direccion} onChangeText={(v) => cambiar('direccion', v)} />
+        <Campo label="Localidad" value={datos.localidad} onChangeText={(v) => cambiar('localidad', v)} />
+        <Campo label="Descripción" value={datos.descripcion} onChangeText={(v) => cambiar('descripcion', v)} multiline />
+        <Campo label="Horarios" value={datos.horario} onChangeText={(v) => cambiar('horario', v)} />
+        <Campo label="Condiciones de venta" value={datos.condicionesVenta} onChangeText={(v) => cambiar('condicionesVenta', v)} multiline />
+      </View>
+      <View style={styles.tarjeta}>
+        <Text style={styles.subtitulo}>Envíos</Text>
+        <FilaSwitch titulo="Habilitar envío a domicilio" valor={datos.envioHabilitado} onChange={(v) => cambiar('envioHabilitado', v)} />
+        <Campo label="Costo base de envío ($)" value={String(datos.costoEnvioBase ?? 0)} onChangeText={(v) => cambiar('costoEnvioBase', v.replace(/[^0-9.]/g, ''))} keyboardType="decimal-pad" />
+        <Text style={styles.ayuda}>Este importe se suma al costo calculado según la distancia cuando el cliente prepara un envío.</Text>
+      </View>
+      <View style={styles.tarjeta}>
+        <Text style={styles.subtitulo}>Medios de pago disponibles</Text>
+        <FilaSwitch titulo="Tarjeta de crédito" valor={datos.metodosPago.credito} onChange={(v) => cambiarMetodo('credito', v)} />
+        <FilaSwitch titulo="Tarjeta de débito" valor={datos.metodosPago.debito} onChange={(v) => cambiarMetodo('debito', v)} />
+        <FilaSwitch titulo="Rapipago (efectivo)" valor={datos.metodosPago.rapipago} onChange={(v) => cambiarMetodo('rapipago', v)} />
+        <Text style={styles.ayuda}>Los pagos con tarjeta siguen siendo una simulación; esta app no está conectada a una pasarela de cobro.</Text>
+      </View>
+      <TouchableOpacity style={[styles.boton, guardando && { opacity: 0.6 }]} onPress={guardar} disabled={guardando}><Text style={styles.botonTexto}>{guardando ? 'Guardando...' : 'Guardar configuración de la tienda'}</Text></TouchableOpacity>
+    </ScrollView>
+  );
+}
+function Campo({ label, multiline, ...props }) { return <View style={styles.campo}><Text style={styles.etiqueta}>{label}</Text><TextInput style={[styles.input, multiline && styles.multiline]} multiline={multiline} {...props} /></View>; }
+function FilaSwitch({ titulo, valor, onChange }) { return <View style={styles.filaSwitch}><Text style={styles.textoSwitch}>{titulo}</Text><Switch value={Boolean(valor)} onValueChange={onChange} trackColor={{ true: '#E5A33A' }} /></View>; }
+const styles = StyleSheet.create({ contenedor: { flex: 1, backgroundColor: '#FFF8E1' }, contenido: { padding: 16, paddingBottom: 32 }, centrado: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF8E1' }, titulo: { fontSize: 23, fontWeight: 'bold', color: '#38240D' }, descripcion: { color: '#765F43', marginTop: 5, marginBottom: 12, lineHeight: 18 }, tarjeta: { backgroundColor: '#fff', borderRadius: 12, padding: 15, marginBottom: 12 }, subtitulo: { fontSize: 16, fontWeight: 'bold', color: '#493116', marginBottom: 6 }, campo: { marginTop: 9 }, etiqueta: { color: '#80500F', fontSize: 12, fontWeight: '600', marginBottom: 4 }, input: { borderWidth: 1, borderColor: '#E8D8C2', backgroundColor: '#FFFCF5', borderRadius: 8, padding: 10, color: '#35230E' }, multiline: { minHeight: 72, textAlignVertical: 'top' }, filaSwitch: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#F3EBDD' }, textoSwitch: { color: '#35230E', fontSize: 13, flex: 1 }, ayuda: { color: '#8A785D', fontSize: 11, lineHeight: 16, marginTop: 8 }, boton: { backgroundColor: '#E8A23A', padding: 14, borderRadius: 9, alignItems: 'center', marginBottom: 15 }, botonTexto: { color: '#38240D', fontWeight: 'bold' } });

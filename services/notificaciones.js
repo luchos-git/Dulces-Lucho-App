@@ -57,6 +57,37 @@ export async function programarAvisos(pasos, pedidoId = 'pedido') {
   }
 }
 
+// Notifica un estado real comunicado por el backend (no una etapa basada en temporizador).
+export async function notificarEstadoPedido(numeroPedido, estado) {
+  const textos = {
+    confirmado: ['Pedido confirmado', 'Recibimos tu pedido.'],
+    preparando: ['Tu pedido se está preparando', 'La administración comenzó a preparar tu compra.'],
+    en_camino: ['Tu pedido está en camino', 'Tu compra salió hacia tu dirección.'],
+    listo_para_retirar: ['Tu pedido está listo para retirar', 'Ya podés pasar por el local.'],
+    entregado: ['Pedido entregado', 'La administración marcó tu pedido como entregado.'],
+    cancelado: ['Pedido cancelado', 'La administración canceló tu pedido.'],
+  };
+  const mensaje = textos[estado];
+  if (!mensaje) return false;
+  try {
+    const permiso = await Notifications.getPermissionsAsync();
+    if (!permiso.granted) return false;
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: mensaje[0],
+        body: `Pedido #${numeroPedido}: ${mensaje[1]}`,
+        sound: true,
+        data: { numeroPedido, estado },
+      },
+      trigger: null,
+    });
+    return true;
+  } catch (error) {
+    console.warn('No se pudo mostrar la notificación del pedido:', error.message);
+    return false;
+  }
+}
+
 export async function cancelarAvisos() {
   try {
     await Notifications.cancelAllScheduledNotificationsAsync();

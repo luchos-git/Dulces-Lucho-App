@@ -132,7 +132,7 @@ export default function PanelAdminScreen({ route, navigation }) {
       let imagenes = formulario.imagenes || (formulario.imagenUrl ? [formulario.imagenUrl] : []);
       if (formulario.assets.length) {
         const subidas = await Promise.all(formulario.assets.map((foto) => subirImagenProducto(foto)));
-        imagenes = subidas.map((subida) => subida.imagenUrl);
+        imagenes = subidas.map((subida) => subida.imagenUrl || subida.displayUrl);
       }
       imagenes = imagenes.slice(0, 3);
       const imagenUrl = imagenes[0] || '';

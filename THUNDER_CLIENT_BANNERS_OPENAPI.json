@@ -1,0 +1,385 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Dulces Lucho - Perfil y Banners",
+    "version": "1.0.0",
+    "description": "Solicitudes para comprobar teléfono, perfil de usuario, subida de imágenes y carrusel de banners. Las operaciones usan la API local de Dulces Lucho."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000/api",
+      "description": "Backend local de Dulces Lucho"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Estado"
+    },
+    {
+      "name": "Perfil"
+    },
+    {
+      "name": "Imágenes"
+    },
+    {
+      "name": "Banners"
+    },
+    {
+      "name": "Registro"
+    }
+  ],
+  "paths": {
+    "/estado": {
+      "get": {
+        "tags": [
+          "Estado"
+        ],
+        "summary": "Comprobar backend, MySQL y tabla usuarios",
+        "responses": {
+          "200": {
+            "description": "Conexión y columnas verificadas"
+          },
+          "503": {
+            "description": "No se pudo verificar la base de datos"
+          }
+        }
+      }
+    },
+    "/auth/registro": {
+      "post": {
+        "tags": [
+          "Registro"
+        ],
+        "summary": "Crear cuenta con teléfono opcional",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "nombre",
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "nombre": {
+                    "type": "string",
+                    "example": "Lucía Pérez"
+                  },
+                  "telefono": {
+                    "type": "string",
+                    "maxLength": 30,
+                    "nullable": true,
+                    "example": "11 1234-5678"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "example": "lucia@example.com"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 6,
+                    "example": "clave123"
+                  },
+                  "rol": {
+                    "type": "string",
+                    "enum": [
+                      "cliente",
+                      "admin"
+                    ],
+                    "default": "cliente"
+                  },
+                  "codigoAutorizacion": {
+                    "type": "string"
+                  },
+                  "claveUnica": {
+                    "type": "string",
+                    "pattern": "^[0-9]{6}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Cuenta creada"
+          },
+          "400": {
+            "description": "Datos inválidos"
+          },
+          "409": {
+            "description": "El correo ya existe"
+          }
+        }
+      }
+    },
+    "/usuarios/{id}/perfil": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "example": 1
+        }
+      ],
+      "get": {
+        "tags": [
+          "Perfil"
+        ],
+        "summary": "Consultar nombre, correo, teléfono y rol",
+        "responses": {
+          "200": {
+            "description": "Datos públicos del perfil"
+          },
+          "404": {
+            "description": "Usuario no encontrado"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Perfil"
+        ],
+        "summary": "Actualizar nombre y teléfono",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "nombre",
+                  "telefono"
+                ],
+                "properties": {
+                  "nombre": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "example": "Lucía Pérez"
+                  },
+                  "telefono": {
+                    "type": "string",
+                    "maxLength": 30,
+                    "example": "11 5555-1234"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Perfil actualizado"
+          },
+          "400": {
+            "description": "Datos inválidos"
+          },
+          "404": {
+            "description": "Usuario no encontrado"
+          }
+        }
+      }
+    },
+    "/imagenes/producto": {
+      "post": {
+        "tags": [
+          "Imágenes"
+        ],
+        "summary": "Subir imagen a ImgBB",
+        "description": "En Thunder Client elegir Body > Form y adjuntar un archivo en el campo image. El servidor también acepta JSON base64 desde Expo Go.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "image": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "image"
+                ]
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "image": {
+                    "type": "string",
+                    "description": "Contenido de imagen en base64"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Imagen subida; devuelve imagenUrl"
+          },
+          "413": {
+            "description": "Archivo demasiado grande"
+          },
+          "502": {
+            "description": "ImgBB rechazó la imagen o no respondió"
+          }
+        }
+      }
+    },
+    "/banners": {
+      "get": {
+        "tags": [
+          "Banners"
+        ],
+        "summary": "Listar banners activos para el carrusel",
+        "responses": {
+          "200": {
+            "description": "Lista ordenada de banners activos"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Banners"
+        ],
+        "summary": "Crear un banner",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "imagenUrl"
+                ],
+                "properties": {
+                  "titulo": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "example": "Promoción de la semana"
+                  },
+                  "imagenUrl": {
+                    "type": "string",
+                    "format": "uri",
+                    "example": "https://i.ibb.co/ejemplo/banner.jpg"
+                  },
+                  "orden": {
+                    "type": "integer",
+                    "example": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Banner creado"
+          },
+          "400": {
+            "description": "Datos inválidos"
+          }
+        }
+      }
+    },
+    "/banners/admin": {
+      "get": {
+        "tags": [
+          "Banners"
+        ],
+        "summary": "Listar todos los banners para administración",
+        "responses": {
+          "200": {
+            "description": "Lista completa, incluidos ocultos"
+          }
+        }
+      }
+    },
+    "/banners/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "example": 1
+        }
+      ],
+      "put": {
+        "tags": [
+          "Banners"
+        ],
+        "summary": "Editar, reordenar, mostrar u ocultar banner",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "imagenUrl",
+                  "orden"
+                ],
+                "properties": {
+                  "titulo": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "imagenUrl": {
+                    "type": "string",
+                    "format": "uri",
+                    "example": "https://i.ibb.co/ejemplo/banner.jpg"
+                  },
+                  "orden": {
+                    "type": "integer",
+                    "example": 1
+                  },
+                  "activo": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Banner actualizado"
+          },
+          "404": {
+            "description": "Banner no encontrado"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Banners"
+        ],
+        "summary": "Ocultar un banner (baja lógica)",
+        "responses": {
+          "200": {
+            "description": "Banner ocultado del carrusel"
+          },
+          "404": {
+            "description": "Banner no encontrado"
+          }
+        }
+      }
+    }
+  }
+}

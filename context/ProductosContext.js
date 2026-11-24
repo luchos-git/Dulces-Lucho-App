@@ -13,21 +13,42 @@ const productosIniciales = [
   { id: 5, nombre: 'Combo 4 obleas + alfajor con jugo Baggio', categoria: 'Combos', precio: 2400, descripcion: 'La bolsita de 4 obleas Smacks y alfajor, junto con un jugo Baggio.', imagenUrl: '', imagenes: [] },
 ];
 
+function normalizarImagenes(producto = {}) {
+  const principal = String(
+    producto.miniaturaUrl || producto.miniatura_url || producto.imagenUrl ||
+    producto.imagen_url || producto.portada || producto.imagen || ''
+  ).trim();
+  let lista = producto.imagenes ?? producto.imagenesJson ?? producto.imagenes_json ?? producto.galeria ?? [];
+  for (let intento = 0; intento < 2 && typeof lista === 'string' && lista.trim(); intento += 1) {
+    try { lista = JSON.parse(lista); }
+    catch { lista = /^https?:\/\//i.test(lista.trim()) ? [lista.trim()] : []; break; }
+  }
+  if (!Array.isArray(lista)) lista = lista ? [lista] : [];
+  const urls = lista.map((item) => {
+    if (typeof item === 'string') return item;
+    return item?.url || item?.imagenUrl || item?.imageUrl || item?.src || item?.displayUrl || item?.display_url || item?.data?.url || item?.data?.display_url || '';
+  }).map((url) => String(url || '').trim()).filter((url) => /^https?:\/\//i.test(url));
+  if (!urls.length && principal && /^https?:\/\//i.test(principal)) urls.push(principal);
+  const imagenes = [...new Set(urls)].slice(0, 3);
+  return { ...producto, imagenes, imagenUrl: imagenes[0] || '', miniaturaUrl: imagenes[0] || '' };
+}
+
 export function ProductosProvider({ children }) {
   const [productos, setProductos] = useState([]);
   const [cargando, setCargando] = useState(true);
 
   const guardarCache = async (lista) => {
-    setProductos(lista);
-    await AsyncStorage.setItem(CLAVE_PRODUCTOS, JSON.stringify(lista));
+    const normalizados = (Array.isArray(lista) ? lista : []).map(normalizarImagenes);
+    setProductos(normalizados);
+    await AsyncStorage.setItem(CLAVE_PRODUCTOS, JSON.stringify(normalizados));
+    return normalizados;
   };
 
   // Primero intenta leer MySQL. Si el servidor no está disponible, muestra la última copia local.
   const cargarProductos = async () => {
     try {
       const lista = await api('/productos');
-      await guardarCache(lista);
-      return lista;
+      return await guardarCache(Array.isArray(lista) ? lista : lista?.productos || []);
     } catch (error) {
       const cache = await AsyncStorage.getItem(CLAVE_PRODUCTOS);
       const listaGuardada = cache ? JSON.parse(cache) : productosIniciales;
@@ -42,20 +63,20 @@ export function ProductosProvider({ children }) {
 
   // CREATE: envía el producto nuevo al backend y actualiza la lista de la app.
   const agregarProducto = async (producto) => {
-    const guardado = await api('/productos', {
+    const guardado = normalizarImagenes(await api('/productos', {
       method: 'POST',
       body: JSON.stringify(producto),
-    });
+    }));
     await guardarCache([guardado, ...productos]);
     return guardado;
   };
 
   // UPDATE: reemplaza el producto editado aunque el id llegue como número o texto.
   const editarProducto = async (id, producto) => {
-    const actualizado = await api(`/productos/${id}`, {
+    const actualizado = normalizarImagenes(await api(`/productos/${id}`, {
       method: 'PUT',
       body: JSON.stringify(producto),
-    });
+    }));
     const existe = productos.some((item) => String(item.id) === String(id));
     const lista = existe
       ? productos.map((item) => String(item.id) === String(id) ? actualizado : item)

@@ -1,12 +1,13 @@
 // explicación del archivo: reúne los datos de entrega, cupón y medio de pago y crea el pedido dentro de la app
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { cupones } from '../data/cupones';
 import { useCarrito } from '../context/CarritoContext';
 import EntregaEnvio, { useEntrega } from '../components/EntregaEnvio';
 import { usePedido } from '../context/PedidoContext';
-import { pedirPermisoNotificaciones, programarAvisos } from '../services/notificaciones';
-import { pasosDe } from '../data/seguimiento';
+import { pedirPermisoNotificaciones, notificarEstadoPedido } from '../services/notificaciones';
+import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
 
 const MEDIOS_DE_PAGO = [
   { id: 'credito', nombre: 'Tarjeta de crédito' },
@@ -31,11 +32,14 @@ const generarCodigoRapipago = () =>
 
 export default function PrepararCompra({ route, navigation }) {
   const { items, subtotal, comprarAhora, entrega: entregaInicial } = route.params;
+  const { usuario } = useAuth();
   const { quitarSeleccionados } = useCarrito();
   const { crearPedido } = usePedido();
+  const [envioHabilitado, setEnvioHabilitado] = useState(true);
+  const [costoEnvioBase, setCostoEnvioBase] = useState(0);
 
-  // La entrega arranca con lo que se eligió antes (carrito o "Comprar ahora") y se puede cambiar acá
-  const entrega = useEntrega(entregaInicial);
+  // La entrega arranca con lo que se eligió antes (carrito o "Comprar ahora") y se puede cambiar acá.
+  const entrega = useEntrega(entregaInicial, costoEnvioBase);
 
   // datos que se ingresan para aplicar descuentos y seleccionar el medio de pago
   const [codigoCupon, setCodigoCupon] = useState('');
@@ -47,6 +51,30 @@ export default function PrepararCompra({ route, navigation }) {
   const [titular, setTitular] = useState('');
   const [vencimiento, setVencimiento] = useState('');
   const [cvv, setCvv] = useState('');
+  const [mediosPago, setMediosPago] = useState({ credito: true, debito: true, rapipago: true });
+  const [notificacionesActivas, setNotificacionesActivas] = useState(true);
+  const [cargandoPreferencias, setCargandoPreferencias] = useState(true);
+
+  // Recupera el medio de pago y la dirección guardados en Mi configuración.
+  useEffect(() => {
+    let vigente = true;
+    Promise.all([api('/configuracion-tienda'), api(`/usuarios/${usuario.id}/preferencias`)])
+      .then(([tienda, prefs]) => {
+        if (!vigente) return;
+        const disponibles = tienda.metodosPago || { credito: true, debito: true, rapipago: true };
+        setMediosPago(disponibles);
+        setEnvioHabilitado(Boolean(tienda.envioHabilitado));
+        setCostoEnvioBase(Number(tienda.costoEnvioBase || 0));
+        if (!tienda.envioHabilitado) entrega.setConEnvio(false);
+        if (prefs.metodoPagoPreferido && disponibles[prefs.metodoPagoPreferido]) setMedioPago(prefs.metodoPagoPreferido);
+        if (!entregaInicial?.direccion && prefs.direccion) entrega.cambiarDireccion(prefs.direccion);
+        if (!entregaInicial?.localidad && prefs.localidad) entrega.cambiarLocalidad(prefs.localidad);
+        setNotificacionesActivas(Boolean(prefs.notificacionesActivas));
+      })
+      .catch((error) => console.warn('No se pudieron recuperar las preferencias de compra:', error.message))
+      .finally(() => { if (vigente) setCargandoPreferencias(false); });
+    return () => { vigente = false; };
+  }, [usuario?.id]);
 
   // ---- Cálculo del total ----
   let descuento = 0;
@@ -108,22 +136,17 @@ export default function PrepararCompra({ route, navigation }) {
     return null;
   };
 
-  // el pago se simula en la app y no se envía a una pasarela ni a una ruta de ventas de mysql
-  // ---- Confirmar ----
+  // Los datos de tarjeta se validan para la demostración, pero nunca se envían ni se guardan.
+  // La compra sí se registra en MySQL para que el cliente y administración compartan el historial.
   const confirmarCompra = () => {
-    // 1) Tiene que haber un medio de pago elegido
-    if (!medioPago) {
-      Alert.alert('Falta el medio de pago', 'Elegí cómo querés pagar para poder continuar.');
+    if (!medioPago || !mediosPago[medioPago]) {
+      Alert.alert('Falta el medio de pago', 'Elegí un medio de pago habilitado por la tienda.');
       return;
     }
-
-    // 2) Si es envío, el costo tiene que estar calculado
     if (entrega.conEnvio && !entrega.envio) {
       Alert.alert('Falta el envío', 'Calculá el costo de envío antes de confirmar.');
       return;
     }
-
-    // 3) Con tarjeta, los datos tienen que estar completos y bien
     if (medioPago !== 'rapipago') {
       const error = validarTarjeta();
       if (error) {
@@ -133,40 +156,45 @@ export default function PrepararCompra({ route, navigation }) {
     }
 
     const codigoRapipago = medioPago === 'rapipago' ? generarCodigoRapipago() : null;
-    const detallePago = codigoRapipago
-      ? `Tu código de pago es ${codigoRapipago}. Abonalo en cualquier sucursal de Rapipago.`
-      : 'Tu pago fue aprobado.';
-
     Alert.alert(
-      '¡Compra confirmada!',
-      `${detallePago}\n\nTotal: $${total}`,
+      'Confirmar compra',
+      `Total estimado: $${total}\n\n¿Querés registrar el pedido?`,
       [
+        { text: 'Volver', style: 'cancel' },
         {
-          text: 'Ver mi pedido',
+          text: 'Confirmar',
           onPress: async () => {
-            // Si compró desde el carrito, esos productos salen del carrito
-            if (!comprarAhora) quitarSeleccionados();
+            try {
+              const venta = await api('/ventas', {
+                method: 'POST',
+                body: JSON.stringify({
+                  usuarioId: usuario.id,
+                  items: items.map((i) => ({ id: i.id, cantidad: i.cantidad })),
+                  metodoPago,
+                  codigoCupon: cuponAplicado?.codigo || '',
+                  codigoRapipago,
+                  conEnvio: Boolean(entrega.conEnvio),
+                  direccion: entrega.conEnvio ? entrega.direccion : '',
+                  localidad: entrega.conEnvio ? entrega.localidad : '',
+                  distanciaKm: entrega.conEnvio && entrega.envio ? entrega.envio.distanciaKm : null,
+                  costoEnvio: entrega.conEnvio ? envioFinal : 0,
+                }),
+              });
 
-            // Pide permiso para avisarle cómo va su pedido
-            const avisosActivados = await pedirPermisoNotificaciones();
+              if (!comprarAhora) quitarSeleccionados();
+              const avisosActivados = notificacionesActivas ? await pedirPermisoNotificaciones() : false;
+              const pedido = crearPedido({ ...venta, avisosActivados, estado: venta.estadoPedido || venta.estado || 'confirmado', estadoPedido: venta.estadoPedido || venta.estado || 'confirmado' });
+              if (avisosActivados) await notificarEstadoPedido(venta.numero, 'confirmado');
 
-            const pedido = crearPedido({
-              items: items.map((i) => ({ id: i.id, nombre: i.nombre, cantidad: i.cantidad, precio: i.precio })),
-              total,
-              medioPago,
-              codigoRapipago,
-              conEnvio: entrega.conEnvio,
-              direccion: entrega.conEnvio ? entrega.direccion : null,
-              localidad: entrega.conEnvio ? entrega.localidad : null,
-              destino: entrega.conEnvio && entrega.envio ? entrega.envio.destino : null,
-              distanciaKm: entrega.conEnvio && entrega.envio ? entrega.envio.distanciaKm : null,
-              avisosActivados,
-            });
-
-            if (avisosActivados) await programarAvisos(pasosDe(pedido), pedido.id);
-
-            // Vuelve al inicio y abre el seguimiento (el botón "atrás" lleva al inicio)
-            navigation.reset({ index: 1, routes: [{ name: 'Inicio' }, { name: 'Seguimiento' }] });
+              const mensaje = venta.codigoRapipago
+                ? `Pedido #${venta.numero} registrado. Código de Rapipago: ${venta.codigoRapipago}.`
+                : `Pedido #${venta.numero} registrado correctamente.`;
+              Alert.alert('¡Pedido registrado!', `${mensaje}\nTotal: $${Number(venta.total).toFixed(2)}`, [
+                { text: 'Ver mi pedido', onPress: () => navigation.reset({ index: 1, routes: [{ name: 'Inicio' }, { name: 'Seguimiento', params: { pedidoId: pedido.id } }] }) },
+              ]);
+            } catch (error) {
+              Alert.alert('No se pudo registrar la compra', error.message || 'Revisá la conexión con el backend e intentá nuevamente.');
+            }
           },
         },
       ],
@@ -175,7 +203,7 @@ export default function PrepararCompra({ route, navigation }) {
   };
 
   // controla si ya se eligió una forma de pago para habilitar la confirmación
-  const puedeConfirmar = medioPago !== null;
+  const puedeConfirmar = medioPago !== null && Boolean(mediosPago[medioPago]) && !cargandoPreferencias;
 
   return (
     <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
@@ -194,7 +222,8 @@ export default function PrepararCompra({ route, navigation }) {
 
       {/* Entrega (retiro o envío, con origen y destino) */}
       <View style={styles.caja}>
-        <EntregaEnvio entrega={entrega} />
+        <EntregaEnvio entrega={entrega} envioHabilitado={envioHabilitado} tarifaBase={costoEnvioBase} />
+        {!envioHabilitado && <Text style={styles.avisoPago}>La tienda no tiene habilitado el envío a domicilio.</Text>}
       </View>
 
       {/* Cupón */}
@@ -232,7 +261,7 @@ export default function PrepararCompra({ route, navigation }) {
       {/* Medio de pago */}
       <View style={styles.caja}>
         <Text style={styles.titulo}>Medio de pago</Text>
-        {MEDIOS_DE_PAGO.map((medio) => (
+        {MEDIOS_DE_PAGO.filter((medio) => mediosPago[medio.id]).map((medio) => (
           <TouchableOpacity
             key={medio.id}
             style={[styles.opcionPago, medioPago === medio.id && styles.opcionPagoActiva]}
@@ -243,6 +272,8 @@ export default function PrepararCompra({ route, navigation }) {
           </TouchableOpacity>
         ))}
 
+        {cargandoPreferencias && <Text style={styles.avisoPago}>Cargando medios habilitados...</Text>}
+        {!cargandoPreferencias && !MEDIOS_DE_PAGO.some((medio) => mediosPago[medio.id]) && <Text style={styles.avisoPago}>La tienda no tiene medios de pago habilitados en este momento.</Text>}
         {!medioPago && <Text style={styles.avisoPago}>Elegí un medio de pago para poder confirmar la compra.</Text>}
 
         {(medioPago === 'credito' || medioPago === 'debito') && (
