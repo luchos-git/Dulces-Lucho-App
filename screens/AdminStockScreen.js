@@ -69,7 +69,6 @@ export default function AdminStockScreen() {
       const iniciales = {};
       (resultado.productos || []).forEach((p) => {
         iniciales[p.id] = {
-          unidadesAgregar: '0',
           stockMinimo: String(p.stockMinimo ?? 0),
           proveedorId: p.proveedorId ? String(p.proveedorId) : '',
           diasReposicionEstimados: String(p.diasReposicionEstimados || 7),
@@ -116,27 +115,22 @@ export default function AdminStockScreen() {
     const f = formularios[producto.id] || {};
     const body = {
       adminId: usuario.id,
-      unidadesAgregar: Number(f.unidadesAgregar || 0),
       stockMinimo: Number(f.stockMinimo),
       proveedorId: f.proveedorId || null,
       diasReposicionEstimados: Number(f.diasReposicionEstimados || 7),
     };
-    if (!Number.isInteger(body.unidadesAgregar) || body.unidadesAgregar < 0 || body.unidadesAgregar > 100000
-      || !Number.isInteger(body.stockMinimo) || body.stockMinimo < 0
+    if (!Number.isInteger(body.stockMinimo) || body.stockMinimo < 0
       || !Number.isInteger(body.diasReposicionEstimados) || body.diasReposicionEstimados < 1 || body.diasReposicionEstimados > 120) {
-      Alert.alert('Revisá las cantidades', 'Las unidades a sumar y el mínimo deben ser números enteros no negativos. El plazo debe ser de 1 a 120 días.');
+      Alert.alert('Revisá la configuración', 'El stock mínimo debe ser un entero no negativo. El plazo debe ser de 1 a 120 días.');
       return;
     }
     setGuardandoId(producto.id);
     try {
-      const resultado = await api(`/admin/productos/${producto.id}/stock`, { method: 'PATCH', body: JSON.stringify(body) });
+      await api(`/admin/productos/${producto.id}/stock`, { method: 'PATCH', body: JSON.stringify(body) });
       await cargar();
-      const sumadas = Number(resultado.unidadesAgregadas || 0);
       Alert.alert(
-        sumadas > 0 ? 'Unidades sumadas' : 'Configuración guardada',
-        sumadas > 0
-          ? `Se agregaron ${sumadas} unidades a ${producto.nombre}. Ahora hay ${resultado.stockDisponible} disponibles.`
-          : `Se guardaron el mínimo, el proveedor y el plazo de reposición de ${producto.nombre}.`,
+        'Configuración guardada',
+        `Se guardaron el mínimo, el proveedor y el plazo de reposición de ${producto.nombre}. La cantidad disponible solo cambia con ventas y recepciones de proveedores.`,
       );
     } catch (error) {
       Alert.alert('No se pudo actualizar el stock', error.message);
@@ -450,16 +444,16 @@ export default function AdminStockScreen() {
                 <View style={styles.stockActualPanel}>
                   <Text style={styles.label}>Cantidad actual (solo lectura)</Text>
                   <Text style={styles.stockActualNumero}>{stockDe(producto)} unidades</Text>
-                  <Text style={styles.ayuda}>Este número cambia automáticamente con las ventas y las recepciones. No se puede reemplazar manualmente.</Text>
+                  <Text style={styles.ayuda}>Este número cambia automáticamente cuando se confirma una compra de cliente o cuando recibís mercadería de un proveedor. No existe una carga manual de unidades.</Text>
                 </View>
                 <View style={styles.filaCampos}>
                   <View style={styles.campoMitad}>
-                    <Text style={styles.label}>Unidades a sumar</Text>
-                    <TextInput style={styles.input} value={f.unidadesAgregar ?? '0'} keyboardType="number-pad" onChangeText={(v) => cambiarFormulario(producto.id, 'unidadesAgregar', v.replace(/[^0-9]/g, ''))} placeholder="Ej.: 12" />
-                  </View>
-                  <View style={styles.campoMitad}>
                     <Text style={styles.label}>Avisar cuando queden</Text>
                     <TextInput style={styles.input} value={f.stockMinimo ?? '0'} keyboardType="number-pad" onChangeText={(v) => cambiarFormulario(producto.id, 'stockMinimo', v.replace(/[^0-9]/g, ''))} />
+                  </View>
+                  <View style={styles.campoMitad}>
+                    <Text style={styles.label}>Días estimados de reposición</Text>
+                    <TextInput style={styles.input} keyboardType="number-pad" value={f.diasReposicionEstimados ?? '7'} onChangeText={(v) => cambiarFormulario(producto.id, 'diasReposicionEstimados', v.replace(/[^0-9]/g, ''))} />
                   </View>
                 </View>
                 <Text style={styles.label}>Proveedor habitual</Text>
@@ -467,10 +461,9 @@ export default function AdminStockScreen() {
                   <TouchableOpacity style={[styles.chip, !f.proveedorId && styles.chipActivo]} onPress={() => cambiarFormulario(producto.id, 'proveedorId', '')}><Text style={styles.chipTexto}>Sin asignar</Text></TouchableOpacity>
                   {datos.proveedores.map((p) => <TouchableOpacity key={p.id} style={[styles.chip, String(f.proveedorId) === String(p.id) && styles.chipActivo]} onPress={() => cambiarFormulario(producto.id, 'proveedorId', String(p.id))}><Text style={styles.chipTexto}>{p.nombre}</Text></TouchableOpacity>)}
                 </ScrollView>
-                <View style={styles.filaCampos}>
-                  <View style={styles.campoMitad}><Text style={styles.label}>Días estimados de reposición</Text><TextInput style={styles.input} keyboardType="number-pad" value={f.diasReposicionEstimados ?? '7'} onChangeText={(v) => cambiarFormulario(producto.id, 'diasReposicionEstimados', v.replace(/[^0-9]/g, ''))} /></View>
-                  <View style={styles.campoMitad}><TouchableOpacity style={styles.botonGuardarStock} onPress={() => guardarStock(producto)} disabled={guardandoId === producto.id}><Text style={styles.botonTexto}>{guardandoId === producto.id ? 'Guardando…' : Number(f.unidadesAgregar || 0) > 0 ? `Sumar ${Number(f.unidadesAgregar)} unidades` : 'Guardar configuración'}</Text></TouchableOpacity></View>
-                </View>
+                <TouchableOpacity style={styles.botonGuardarStock} onPress={() => guardarStock(producto)} disabled={guardandoId === producto.id}>
+                  <Text style={styles.botonTexto}>{guardandoId === producto.id ? 'Guardando…' : 'Guardar configuración de reposición'}</Text>
+                </TouchableOpacity>
               </>}
               {puedeDestacados && <View style={styles.filaDestacado}>
                 <View style={{ flex: 1, marginRight: 10 }}><Text style={styles.labelDestacado}>Mostrar en Productos del día</Text><Text style={styles.ayuda}>Orden en la calesita (1 aparece primero)</Text><TextInput style={styles.inputOrden} value={f.destacadoOrden ?? '0'} keyboardType="number-pad" onChangeText={(v) => cambiarFormulario(producto.id, 'destacadoOrden', v.replace(/[^0-9]/g, ''))} /><TouchableOpacity onPress={() => guardarOrdenDestacado(producto)}><Text style={styles.link}>Guardar orden</Text></TouchableOpacity></View>

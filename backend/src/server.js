@@ -1312,20 +1312,22 @@ app.put('/api/admin/proveedores/:id', async (req, res) => {
 
 app.patch('/api/admin/productos/:id/stock', async (req, res) => {
   const adminId = Number(req.body?.adminId);
-  if (!await verificarPermisoAdmin(req, 'gestionar_insumos', adminId)) return res.status(403).json({ error: 'No tenés permiso para administrar el stock.' });
+  if (!await verificarPermisoAdmin(req, 'gestionar_insumos', adminId)) return res.status(403).json({ error: 'No tenés permiso para configurar la reposición.' });
   const id = Number(req.params.id);
-  // La cantidad actual nunca se reemplaza desde esta ruta: únicamente se agregan unidades.
-  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'stockDisponible')) {
-    return res.status(400).json({ error: 'La cantidad actual no se puede reemplazar. Enviá unidadesAgregar para incrementar el stock.' });
+
+  // Esta ruta solo configura avisos y proveedor. Nunca modifica las unidades disponibles.
+  const camposProhibidos = ['stockDisponible', 'stock_disponible', 'unidadesAgregar', 'cantidadAgregar', 'cantidadRecibida', 'unidades', 'stock'];
+  if (camposProhibidos.some((campo) => Object.prototype.hasOwnProperty.call(req.body || {}, campo))) {
+    return res.status(400).json({ error: 'El stock no se puede modificar manualmente. Las unidades se suman únicamente al recibir un pedido de proveedor.' });
   }
-  const unidadesAgregar = Number(req.body?.unidadesAgregar ?? 0);
+
   const minimo = Number(req.body?.stockMinimo ?? 0);
   const dias = Number(req.body?.diasReposicionEstimados ?? 7);
   const proveedorId = req.body?.proveedorId == null || req.body?.proveedorId === '' ? null : Number(req.body.proveedorId);
-  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(unidadesAgregar) || unidadesAgregar < 0 || unidadesAgregar > 100000
-    || !Number.isInteger(minimo) || minimo < 0 || !Number.isInteger(dias) || dias < 1 || dias > 120
+  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(minimo) || minimo < 0
+    || !Number.isInteger(dias) || dias < 1 || dias > 120
     || (proveedorId !== null && (!Number.isInteger(proveedorId) || proveedorId <= 0))) {
-    return res.status(400).json({ error: 'Ingresá unidades a sumar y stock mínimo como enteros no negativos, y un plazo de 1 a 120 días.' });
+    return res.status(400).json({ error: 'El stock mínimo debe ser un entero no negativo, el plazo debe estar entre 1 y 120 días y el proveedor debe ser válido.' });
   }
   const conexion = await db.getConnection();
   try {
@@ -1335,26 +1337,22 @@ app.patch('/api/admin/productos/:id/stock', async (req, res) => {
       if (!proveedor) { await conexion.rollback(); return res.status(400).json({ error: 'El proveedor seleccionado no existe o está inactivo.' }); }
     }
     const [resultado] = await conexion.query(`UPDATE productos
-      SET stock_disponible = stock_disponible + ?, stock_minimo = ?, proveedor_id = ?, dias_reposicion_estimados = ?
-      WHERE id = ? AND activo = 1`, [unidadesAgregar, minimo, proveedorId, dias, id]);
+      SET stock_minimo = ?, proveedor_id = ?, dias_reposicion_estimados = ?
+      WHERE id = ? AND activo = 1`, [minimo, proveedorId, dias, id]);
     if (!resultado.affectedRows) { await conexion.rollback(); return res.status(404).json({ error: 'No se encontró el producto.' }); }
     const [[fila]] = await conexion.query('SELECT stock_disponible AS stockDisponible, stock_minimo AS stockMinimo FROM productos WHERE id = ?', [id]);
-    if (Number(fila.stockDisponible) > 0) {
-      await conexion.query(`UPDATE pedidos_anticipados SET estado = 'producto_disponible'
-        WHERE producto_id = ? AND estado = 'pendiente_reposicion'`, [id]);
-    }
     await conexion.commit();
     res.json({
       ok: true,
       id,
       stockDisponible: Number(fila.stockDisponible),
       stockMinimo: Number(fila.stockMinimo),
-      unidadesAgregadas: unidadesAgregar,
+      mensaje: 'Configuración guardada. El stock solo cambia con ventas y recepciones de proveedores.',
     });
   } catch (error) {
     await conexion.rollback();
-    console.error('Error al incrementar stock:', error.message);
-    res.status(500).json({ error: 'No se pudo incrementar el stock.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+    console.error('Error al guardar configuración de reposición:', error.message);
+    res.status(500).json({ error: 'No se pudo guardar la configuración de reposición.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   } finally {
     conexion.release();
   }
