@@ -51,7 +51,10 @@ function detectarImagen(buf) {
 
 const selectProductos = `
   SELECT p.id, p.nombre, c.nombre AS categoria, p.descripcion, p.precio,
-         p.imagen_url AS imagenUrl, p.imagen_url AS miniaturaUrl, p.imagenes_json AS imagenesJson, p.activo
+         p.imagen_url AS imagenUrl, p.imagen_url AS miniaturaUrl, p.imagenes_json AS imagenesJson, p.activo,
+         p.stock_disponible AS stockDisponible, p.stock_minimo AS stockMinimo,
+         p.destacado_dia AS destacadoDia, p.destacado_orden AS destacadoOrden,
+         p.proveedor_id AS proveedorId, p.dias_reposicion_estimados AS diasReposicionEstimados
   FROM productos p
   INNER JOIN categorias c ON c.id = p.categoria_id
 `;
@@ -105,7 +108,15 @@ function normalizarProducto(producto) {
     principal
   );
   const miniaturaUrl = imagenes[0] || principal || '';
-  return { ...producto, imagenes, imagenUrl: miniaturaUrl, miniaturaUrl };
+  return {
+    ...producto, imagenes, imagenUrl: miniaturaUrl, miniaturaUrl,
+    stockDisponible: Number(producto.stockDisponible ?? producto.stock_disponible ?? 0),
+    stockMinimo: Number(producto.stockMinimo ?? producto.stock_minimo ?? 0),
+    destacadoDia: Boolean(Number(producto.destacadoDia ?? producto.destacado_dia ?? 0)),
+    destacadoOrden: Number(producto.destacadoOrden ?? producto.destacado_orden ?? 0),
+    proveedorId: producto.proveedorId ?? producto.proveedor_id ?? null,
+    diasReposicionEstimados: Number(producto.diasReposicionEstimados ?? producto.dias_reposicion_estimados ?? 7),
+  };
 }
 
 function obtenerImagenesEntrada(producto) {
@@ -211,8 +222,8 @@ const PERMISOS_ADMIN = [
   { codigo: 'gestionar_empleados', nombre: 'Habilitar o pausar empleados administradores' },
   { codigo: 'gestionar_banners', nombre: 'Banners del inicio' },
   { codigo: 'configurar_tienda', nombre: 'Configuración de la tienda' },
-  { codigo: 'gestionar_insumos', nombre: 'Inventario e ingredientes' },
-  { codigo: 'solicitar_compras', nombre: 'Solicitar compras grandes' },
+  { codigo: 'gestionar_insumos', nombre: 'Administrar stock de productos y proveedores' },
+  { codigo: 'solicitar_compras', nombre: 'Solicitar reposiciones y pedidos grandes a proveedores' },
 ];
 
 async function exigirSesionUsuario(req, res, usuarioId) {
@@ -266,11 +277,12 @@ app.get('/api/estado', async (_req, res) => {
     await db.query('SELECT * FROM configuracion_tienda LIMIT 0');
     await db.query('SELECT id, titulo, imagen_url, orden, activo, creado_en FROM banners LIMIT 0');
     await db.query('SELECT id, usuario_id FROM propietario_sistema LIMIT 0');
-    await db.query('SELECT id, nombre, unidad, stock_actual, stock_minimo, proveedor, activo FROM insumos LIMIT 0');
-    await db.query('SELECT producto_id, insumo_id, cantidad_por_producto FROM recetas_productos LIMIT 0');
-    await db.query('SELECT id, numero, proveedor, estado, creado_por_usuario_id FROM compras_insumos LIMIT 0');
-    await db.query('SELECT id, compra_id, insumo_id, cantidad FROM detalle_compras_insumos LIMIT 0');
-    res.json({ ok: true, mensaje: 'Backend, MySQL, banners, propietario, permisos e inventario conectados.' });
+    await db.query('SELECT stock_disponible, stock_minimo, destacado_dia, destacado_orden, proveedor_id, dias_reposicion_estimados FROM productos LIMIT 0');
+    await db.query('SELECT id, nombre, plazo_entrega_dias, activo FROM proveedores LIMIT 0');
+    await db.query('SELECT id, proveedor_id, tipo, estado, fecha_estimada_recepcion FROM pedidos_proveedor LIMIT 0');
+    await db.query('SELECT pedido_proveedor_id, producto_id, cantidad_solicitada, cantidad_recibida FROM detalle_pedidos_proveedor LIMIT 0');
+    await db.query('SELECT id, usuario_id, producto_id, cantidad, fecha_estimada_reposicion, estado FROM pedidos_anticipados LIMIT 0');
+    res.json({ ok: true, mensaje: 'Backend, MySQL, productos, stock, proveedores, reposiciones, pedidos anticipados y banners conectados.' });
   } catch (error) {
     console.error('Error al verificar MySQL/tabla usuarios:', error.code || '', error.sqlMessage || error.message);
     res.status(503).json({
@@ -979,18 +991,33 @@ app.post('/api/ventas', async (req, res) => {
     if (!tienda.metodosPago[metodoPago]) return res.status(400).json({ error: 'Ese medio de pago no está habilitado por la tienda.' });
     if (conEnvio && !tienda.envioHabilitado) return res.status(400).json({ error: 'La tienda no tiene habilitados los envíos a domicilio.' });
 
-    conexion = await db.getConnection();
-    await conexion.beginTransaction();
-    let subtotal = 0;
-    const detalle = [];
+    // Si un cliente envía el mismo producto en dos líneas, unificamos cantidades antes de validar stock.
+    const cantidadesPorProducto = new Map();
     for (const item of itemsEntrada) {
       const productoId = Number(item.id);
       const cantidad = Number(item.cantidad);
       if (!Number.isInteger(productoId) || productoId <= 0 || !Number.isInteger(cantidad) || cantidad <= 0 || cantidad > 100) {
-        throw new Error('Uno de los productos o cantidades no es válido.');
+        return res.status(400).json({ error: 'Uno de los productos o cantidades no es válido.' });
       }
-      const [[producto]] = await conexion.query('SELECT id, nombre, precio FROM productos WHERE id = ? AND activo = 1', [productoId]);
+      cantidadesPorProducto.set(productoId, (cantidadesPorProducto.get(productoId) || 0) + cantidad);
+    }
+    for (const cantidad of cantidadesPorProducto.values()) {
+      if (cantidad > 100) return res.status(400).json({ error: 'La cantidad total de un producto no puede superar 100 unidades por compra.' });
+    }
+
+    conexion = await db.getConnection();
+    await conexion.beginTransaction();
+    let subtotal = 0;
+    const detalle = [];
+    for (const [productoId, cantidad] of cantidadesPorProducto) {
+      const [[producto]] = await conexion.query('SELECT id, nombre, precio, stock_disponible AS stockDisponible FROM productos WHERE id = ? AND activo = 1 FOR UPDATE', [productoId]);
       if (!producto) throw new Error(`El producto ${productoId} ya no está disponible.`);
+      const stockDisponible = Number(producto.stockDisponible || 0);
+      if (stockDisponible < cantidad) {
+        const error = new Error(`No hay stock suficiente de ${producto.nombre}. Disponibles: ${stockDisponible}.`);
+        error.status = 409;
+        throw error;
+      }
       const precio = Number(producto.precio);
       subtotal += precio * cantidad;
       detalle.push({ id: producto.id, nombre: producto.nombre, cantidad, precio });
@@ -1029,6 +1056,7 @@ app.post('/api/ventas', async (req, res) => {
         'INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario) VALUES (?, ?, ?, ?)',
         [resultado.insertId, item.id, item.cantidad, item.precio]
       );
+      await conexion.query('UPDATE productos SET stock_disponible = stock_disponible - ? WHERE id = ?', [item.cantidad, item.id]);
     }
     await conexion.commit();
     res.status(201).json({
@@ -1040,7 +1068,7 @@ app.post('/api/ventas', async (req, res) => {
   } catch (error) {
     if (conexion) await conexion.rollback().catch(() => {});
     console.error('Error al registrar venta:', error.code || '', error.message);
-    res.status(error.code ? 500 : 400).json({
+    res.status(error.status || (error.code ? 500 : 400)).json({
       error: error.code ? 'No se pudo guardar la compra en MySQL. Revisá que estén aplicadas las migraciones de pedidos y configuraciones.' : (error.message || 'No se pudo registrar la compra.'),
     });
   } finally {
@@ -1081,16 +1109,29 @@ app.patch('/api/admin/ventas/:id/estado', async (req, res) => {
   const estadoPedido = String(req.body?.estadoPedido || '');
   if (!await verificarPermisoAdmin(req, 'gestionar_pedidos', adminId)) return res.status(403).json({ error: 'Se requiere una cuenta administradora activa.' });
   if (!Number.isInteger(id) || id <= 0 || !ESTADOS_PEDIDO_VALIDOS.includes(estadoPedido)) return res.status(400).json({ error: 'El pedido o estado no es válido.' });
+  const conexion = await db.getConnection();
   try {
-    const [resultado] = estadoPedido === 'cancelado'
-      ? await db.query("UPDATE ventas SET estado_pedido = ?, estado = 'cancelada' WHERE id = ?", [estadoPedido, id])
-      : await db.query('UPDATE ventas SET estado_pedido = ? WHERE id = ?', [estadoPedido, id]);
-    if (!resultado.affectedRows) return res.status(404).json({ error: 'No se encontró el pedido.' });
-    res.json({ ok: true, id, estadoPedido });
+    await conexion.beginTransaction();
+    const [[venta]] = await conexion.query('SELECT id, estado_pedido AS estadoPedido FROM ventas WHERE id = ? FOR UPDATE', [id]);
+    if (!venta) { await conexion.rollback(); return res.status(404).json({ error: 'No se encontró el pedido.' }); }
+    if (venta.estadoPedido === 'cancelado') { await conexion.rollback(); return res.status(409).json({ error: 'El pedido ya está cancelado y no se puede reactivar.' }); }
+    if (venta.estadoPedido === 'entregado' && estadoPedido !== 'entregado') { await conexion.rollback(); return res.status(409).json({ error: 'Un pedido entregado no se puede cambiar ni cancelar desde esta pantalla.' }); }
+    if (estadoPedido === 'cancelado') {
+      const [items] = await conexion.query('SELECT producto_id, cantidad FROM detalle_ventas WHERE venta_id = ?', [id]);
+      for (const item of items) {
+        await conexion.query('UPDATE productos SET stock_disponible = stock_disponible + ? WHERE id = ?', [Number(item.cantidad), item.producto_id]);
+      }
+      await conexion.query("UPDATE ventas SET estado_pedido = ?, estado = 'cancelada' WHERE id = ?", [estadoPedido, id]);
+    } else {
+      await conexion.query('UPDATE ventas SET estado_pedido = ? WHERE id = ?', [estadoPedido, id]);
+    }
+    await conexion.commit();
+    res.json({ ok: true, id, estadoPedido, stockReintegrado: estadoPedido === 'cancelado' });
   } catch (error) {
+    await conexion.rollback().catch(() => {});
     console.error('Error al actualizar estado del pedido:', error.message);
     res.status(500).json({ error: 'No se pudo actualizar el estado del pedido.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
-  }
+  } finally { conexion.release(); }
 });
 
 // Indicadores operativos basados exclusivamente en las ventas guardadas en MySQL.
@@ -1122,131 +1163,379 @@ app.get('/api/admin/reportes', async (req, res) => {
   }
 });
 
-// INVENTARIO, RECETAS Y SOLICITUDES DE COMPRA A PROVEEDORES.
-app.get('/api/admin/insumos', async (req, res) => {
+// STOCK DE PRODUCTOS TERMINADOS, PROVEEDORES Y PEDIDOS DE REPOSICIÓN.
+function fechaMasDias(dias) {
+  const fecha = new Date();
+  fecha.setHours(12, 0, 0, 0);
+  fecha.setDate(fecha.getDate() + Math.max(0, Number(dias) || 0));
+  return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(fecha.getDate()).padStart(2, '0')}`;
+}
+
+function fechaComoSQL(valor) {
+  if (!valor) return null;
+  if (valor instanceof Date && !Number.isNaN(valor.getTime())) {
+    return `${valor.getFullYear()}-${String(valor.getMonth() + 1).padStart(2, '0')}-${String(valor.getDate()).padStart(2, '0')}`;
+  }
+  const texto = String(valor).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(texto)) return texto.slice(0, 10);
+  const fecha = new Date(texto);
+  if (Number.isNaN(fecha.getTime())) return null;
+  return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(fecha.getDate()).padStart(2, '0')}`;
+}
+
+function diasHastaFecha(fecha) {
+  if (!fecha) return 7;
+  const objetivo = new Date(`${fechaComoSQL(fecha) || fecha}T12:00:00`);
+  const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
+  return Math.max(0, Math.ceil((objetivo - hoy) / 86400000));
+}
+
+async function calcularReposicionProducto(productoId) {
+  const [[producto]] = await db.query(
+    `SELECT p.id, p.nombre, p.stock_disponible AS stockDisponible,
+            p.dias_reposicion_estimados AS diasReposicionEstimados,
+            p.proveedor_id AS proveedorId, pr.nombre AS proveedorNombre,
+            pr.plazo_entrega_dias AS plazoProveedor
+     FROM productos p LEFT JOIN proveedores pr ON pr.id = p.proveedor_id
+     WHERE p.id = ? AND p.activo = 1 LIMIT 1`, [productoId]
+  );
+  if (!producto) return null;
+  const [[pedidoAbierto]] = await db.query(
+    `SELECT pp.fecha_estimada_recepcion AS fechaEstimada
+     FROM pedidos_proveedor pp
+     INNER JOIN detalle_pedidos_proveedor dp ON dp.pedido_proveedor_id = pp.id
+     WHERE dp.producto_id = ? AND pp.estado IN ('solicitado','confirmado','en_camino')
+       AND pp.fecha_estimada_recepcion IS NOT NULL
+     ORDER BY pp.fecha_estimada_recepcion ASC LIMIT 1`, [productoId]
+  );
+  const dias = pedidoAbierto?.fechaEstimada
+    ? diasHastaFecha(pedidoAbierto.fechaEstimada)
+    : Number(producto.plazoProveedor || producto.diasReposicionEstimados || 7);
+  return {
+    ...producto,
+    diasEstimados: dias,
+    fechaEstimada: pedidoAbierto?.fechaEstimada
+      ? fechaComoSQL(pedidoAbierto.fechaEstimada)
+      : fechaMasDias(dias),
+    proveedorNombre: producto.proveedorNombre || null,
+  };
+}
+
+app.get('/api/productos/:id/disponibilidad', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'El ID del producto no es válido.' });
+  try {
+    const dato = await calcularReposicionProducto(id);
+    if (!dato) return res.status(404).json({ error: 'No se encontró el producto.' });
+    res.json({ productoId: id, stockDisponible: Number(dato.stockDisponible || 0), agotado: Number(dato.stockDisponible || 0) <= 0, proveedor: dato.proveedorNombre, diasEstimados: dato.diasEstimados, fechaEstimada: dato.fechaEstimada });
+  } catch (error) {
+    console.error('Error al consultar disponibilidad:', error.message);
+    res.status(500).json({ error: 'No se pudo consultar la disponibilidad.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.get('/api/admin/abastecimiento', async (req, res) => {
   const adminId = req.query.adminId;
-  const puedeInventario = await verificarPermisoAdmin(req, 'gestionar_insumos', adminId);
-  const puedeComprar = await verificarPermisoAdmin(req, 'solicitar_compras', adminId);
-  if (!puedeInventario && !puedeComprar) return res.status(403).json({ error: 'No tenés permiso para consultar inventario o compras.' });
+  const puedeStock = await verificarPermisoAdmin(req, 'gestionar_insumos', adminId);
+  const puedePedidos = await verificarPermisoAdmin(req, 'solicitar_compras', adminId);
+  const puedeProductos = await verificarPermisoAdmin(req, 'gestionar_productos', adminId);
+  if (!puedeStock && !puedePedidos && !puedeProductos) return res.status(403).json({ error: 'No tenés permiso para consultar stock, productos o reposiciones.' });
   try {
-    const [insumos] = await db.query(`SELECT id, nombre, unidad, stock_actual AS stockActual,
-      stock_minimo AS stockMinimo, proveedor, activo FROM insumos WHERE activo = 1 ORDER BY nombre`);
-    const [productos] = await db.query('SELECT id, nombre FROM productos WHERE activo = 1 ORDER BY nombre');
-    const [recetas] = await db.query(`SELECT rp.producto_id AS productoId, p.nombre AS productoNombre,
-      rp.insumo_id AS insumoId, i.nombre AS insumoNombre, i.unidad,
-      rp.cantidad_por_producto AS cantidadPorProducto
-      FROM recetas_productos rp INNER JOIN productos p ON p.id = rp.producto_id
-      INNER JOIN insumos i ON i.id = rp.insumo_id ORDER BY p.nombre, i.nombre`);
-    const [compras] = await db.query(`SELECT id, numero, proveedor, estado, notas, creado_en AS creadoEn
-      FROM compras_insumos ORDER BY creado_en DESC, id DESC LIMIT 40`);
-    for (const compra of compras) {
-      const [items] = await db.query(`SELECT d.insumo_id AS insumoId, i.nombre, i.unidad, d.cantidad
-        FROM detalle_compras_insumos d INNER JOIN insumos i ON i.id = d.insumo_id
-        WHERE d.compra_id = ? ORDER BY d.id`, [compra.id]);
-      compra.items = items.map((x) => ({ ...x, cantidad: Number(x.cantidad) }));
+    const [productos] = await db.query(`${selectProductos} WHERE p.activo = 1 ORDER BY c.nombre, p.nombre`);
+    const [proveedores] = await db.query('SELECT id, nombre, contacto, telefono, email, localidad, plazo_entrega_dias AS plazoEntregaDias, activo FROM proveedores WHERE activo = 1 ORDER BY nombre');
+    const [pedidos] = await db.query(`SELECT pp.id, pp.numero, pp.tipo, pp.estado, pp.proveedor_id AS proveedorId, pp.fecha_estimada_recepcion AS fechaEstimada,
+      pp.notas, pp.creado_en AS creadoEn, pr.nombre AS proveedor
+      FROM pedidos_proveedor pp INNER JOIN proveedores pr ON pr.id = pp.proveedor_id
+      ORDER BY CASE WHEN pp.estado IN ('solicitado', 'confirmado', 'en_camino') THEN 0 ELSE 1 END, pp.creado_en DESC, pp.id DESC LIMIT 100`);
+    for (const pedido of pedidos) {
+      const [items] = await db.query(`SELECT dp.producto_id AS productoId, p.nombre, dp.cantidad_solicitada AS cantidad,
+        dp.cantidad_recibida AS cantidadRecibida FROM detalle_pedidos_proveedor dp
+        INNER JOIN productos p ON p.id = dp.producto_id WHERE dp.pedido_proveedor_id = ? ORDER BY p.nombre`, [pedido.id]);
+      pedido.items = items.map((item) => ({ ...item, cantidad: Number(item.cantidad), cantidadRecibida: Number(item.cantidadRecibida) }));
     }
-    res.json({ insumos: insumos.map((x) => ({ ...x, stockActual: Number(x.stockActual), stockMinimo: Number(x.stockMinimo) })), productos, recetas: recetas.map((x) => ({ ...x, cantidadPorProducto: Number(x.cantidadPorProducto) })), compras });
+    const [anticipados] = await db.query(`SELECT pa.id, pa.numero, pa.usuario_id AS usuarioId, u.nombre AS cliente,
+      pa.producto_id AS productoId, p.nombre AS producto, pa.cantidad, pa.fecha_deseada AS fechaDeseada,
+      pa.modalidad_entrega AS modalidadEntrega, pa.direccion, pa.localidad, pa.metodo_pago AS metodoPago,
+      pa.fecha_estimada_reposicion AS fechaEstimada, pa.plazo_estimado_dias AS plazoEstimadoDias,
+      pa.estado, pa.creado_en AS creadoEn
+      FROM pedidos_anticipados pa INNER JOIN usuarios u ON u.id = pa.usuario_id
+      INNER JOIN productos p ON p.id = pa.producto_id ORDER BY pa.creado_en DESC LIMIT 80`);
+    res.json({
+      productos: productos.map(normalizarProducto), proveedores,
+      pedidos: pedidos.map((p) => ({ ...p, fechaEstimada: fechaComoSQL(p.fechaEstimada) })),
+      anticipados: anticipados.map((p) => ({ ...p, fechaDeseada: fechaComoSQL(p.fechaDeseada), fechaEstimada: fechaComoSQL(p.fechaEstimada) })),
+    });
   } catch (error) {
-    console.error('Error al consultar insumos:', error.message);
-    res.status(500).json({ error: 'No se pudo consultar el inventario. Aplicá la migración de insumos.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+    console.error('Error al consultar abastecimiento:', error.message);
+    res.status(500).json({ error: 'No se pudo consultar stock y proveedores. Aplicá la migración de stock y proveedores.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   }
 });
 
-app.post('/api/admin/insumos', async (req, res) => {
-  const adminId = Number(req.body?.adminId);
-  if (!await verificarPermisoAdmin(req, 'gestionar_insumos', adminId)) return res.status(403).json({ error: 'No tenés permiso para registrar materias primas.' });
+// Solo el propietario registra proveedores. El personal autorizado puede elegirlos para solicitar reposiciones.
+app.post('/api/admin/proveedores', async (req, res) => {
+  if (!await verificarPropietario(req)) return res.status(403).json({ error: 'Solo la cuenta propietaria puede agregar proveedores.' });
   const nombre = String(req.body?.nombre || '').trim();
-  const unidad = String(req.body?.unidad || 'unidad').trim();
-  const stockActual = Number(req.body?.stockActual || 0);
-  const stockMinimo = Number(req.body?.stockMinimo || 0);
-  const proveedor = String(req.body?.proveedor || '').trim();
-  if (!nombre || nombre.length > 120 || !unidad || unidad.length > 20 || !Number.isFinite(stockActual) || stockActual < 0 || !Number.isFinite(stockMinimo) || stockMinimo < 0 || proveedor.length > 150) {
-    return res.status(400).json({ error: 'Revisá el nombre, la unidad, las cantidades y el proveedor.' });
+  const contacto = String(req.body?.contacto || '').trim();
+  const telefono = String(req.body?.telefono || '').trim();
+  const email = String(req.body?.email || '').trim();
+  const localidad = String(req.body?.localidad || '').trim();
+  const plazo = Number(req.body?.plazoEntregaDias || 7);
+  if (!nombre || nombre.length > 150 || contacto.length > 120 || telefono.length > 30 || email.length > 150 || localidad.length > 100 || !Number.isInteger(plazo) || plazo < 1 || plazo > 120) {
+    return res.status(400).json({ error: 'Revisá el nombre, contacto y plazo de entrega (1 a 120 días).' });
   }
   try {
-    const [resultado] = await db.query('INSERT INTO insumos (nombre, unidad, stock_actual, stock_minimo, proveedor) VALUES (?, ?, ?, ?, ?)', [nombre, unidad, stockActual, stockMinimo, proveedor || null]);
-    res.status(201).json({ id: resultado.insertId, nombre, unidad, stockActual, stockMinimo, proveedor });
+    const [resultado] = await db.query(`INSERT INTO proveedores (nombre, contacto, telefono, email, localidad, plazo_entrega_dias)
+      VALUES (?, ?, ?, ?, ?, ?)`, [nombre, contacto || null, telefono || null, email || null, localidad || null, plazo]);
+    res.status(201).json({ id: resultado.insertId, nombre, contacto, telefono, email, localidad, plazoEntregaDias: plazo, activo: 1 });
   } catch (error) {
-    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Ya existe una materia prima con ese nombre.' });
-    console.error('Error al crear insumo:', error.message);
-    res.status(500).json({ error: 'No se pudo registrar el insumo.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Ya existe un proveedor con ese nombre.' });
+    console.error('Error al crear proveedor:', error.message);
+    res.status(500).json({ error: 'No se pudo guardar el proveedor.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   }
 });
 
-app.post('/api/admin/insumos/recetas', async (req, res) => {
-  const adminId = Number(req.body?.adminId);
-  if (!await verificarPermisoAdmin(req, 'gestionar_insumos', adminId)) return res.status(403).json({ error: 'No tenés permiso para definir las materias primas de los productos.' });
-  const productoId = Number(req.body?.productoId);
-  const insumoId = Number(req.body?.insumoId);
-  const cantidad = Number(req.body?.cantidadPorProducto);
-  if (!Number.isInteger(productoId) || productoId <= 0 || !Number.isInteger(insumoId) || insumoId <= 0 || !Number.isFinite(cantidad) || cantidad <= 0) {
-    return res.status(400).json({ error: 'Elegí un producto, una materia prima y una cantidad mayor a cero.' });
-  }
+app.put('/api/admin/proveedores/:id', async (req, res) => {
+  if (!await verificarPropietario(req)) return res.status(403).json({ error: 'Solo la cuenta propietaria puede modificar proveedores.' });
+  const id = Number(req.params.id);
+  const nombre = String(req.body?.nombre || '').trim();
+  const plazo = Number(req.body?.plazoEntregaDias || 7);
+  if (!Number.isInteger(id) || id <= 0 || !nombre || nombre.length > 150 || !Number.isInteger(plazo) || plazo < 1 || plazo > 120) return res.status(400).json({ error: 'Los datos del proveedor no son válidos.' });
   try {
-    await db.query(`INSERT INTO recetas_productos (producto_id, insumo_id, cantidad_por_producto) VALUES (?, ?, ?)
-      ON DUPLICATE KEY UPDATE cantidad_por_producto = VALUES(cantidad_por_producto)`, [productoId, insumoId, cantidad]);
-    res.json({ ok: true, productoId, insumoId, cantidadPorProducto: cantidad });
+    await db.query(`UPDATE proveedores SET nombre = ?, contacto = ?, telefono = ?, email = ?, localidad = ?, plazo_entrega_dias = ?, activo = ? WHERE id = ?`,
+      [nombre, String(req.body?.contacto || '').trim() || null, String(req.body?.telefono || '').trim() || null, String(req.body?.email || '').trim() || null, String(req.body?.localidad || '').trim() || null, plazo, req.body?.activo === false ? 0 : 1, id]);
+    res.json({ ok: true, id });
   } catch (error) {
-    console.error('Error al guardar receta:', error.message);
-    res.status(500).json({ error: 'No se pudo guardar la necesidad del producto. Comprobá que el producto y el insumo existan.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Ya existe otro proveedor con ese nombre.' });
+    res.status(500).json({ error: 'No se pudo actualizar el proveedor.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   }
 });
 
-app.post('/api/admin/compras-insumos', async (req, res) => {
+app.patch('/api/admin/productos/:id/stock', async (req, res) => {
   const adminId = Number(req.body?.adminId);
-  if (!await verificarPermisoAdmin(req, 'solicitar_compras', adminId)) return res.status(403).json({ error: 'No tenés permiso para solicitar compras grandes.' });
-  const proveedor = String(req.body?.proveedor || '').trim();
+  if (!await verificarPermisoAdmin(req, 'gestionar_insumos', adminId)) return res.status(403).json({ error: 'No tenés permiso para administrar el stock.' });
+  const id = Number(req.params.id);
+  // La cantidad actual nunca se reemplaza desde esta ruta: únicamente se agregan unidades.
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'stockDisponible')) {
+    return res.status(400).json({ error: 'La cantidad actual no se puede reemplazar. Enviá unidadesAgregar para incrementar el stock.' });
+  }
+  const unidadesAgregar = Number(req.body?.unidadesAgregar ?? 0);
+  const minimo = Number(req.body?.stockMinimo ?? 0);
+  const dias = Number(req.body?.diasReposicionEstimados ?? 7);
+  const proveedorId = req.body?.proveedorId == null || req.body?.proveedorId === '' ? null : Number(req.body.proveedorId);
+  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(unidadesAgregar) || unidadesAgregar < 0 || unidadesAgregar > 100000
+    || !Number.isInteger(minimo) || minimo < 0 || !Number.isInteger(dias) || dias < 1 || dias > 120
+    || (proveedorId !== null && (!Number.isInteger(proveedorId) || proveedorId <= 0))) {
+    return res.status(400).json({ error: 'Ingresá unidades a sumar y stock mínimo como enteros no negativos, y un plazo de 1 a 120 días.' });
+  }
+  const conexion = await db.getConnection();
+  try {
+    await conexion.beginTransaction();
+    if (proveedorId !== null) {
+      const [[proveedor]] = await conexion.query('SELECT id FROM proveedores WHERE id = ? AND activo = 1', [proveedorId]);
+      if (!proveedor) { await conexion.rollback(); return res.status(400).json({ error: 'El proveedor seleccionado no existe o está inactivo.' }); }
+    }
+    const [resultado] = await conexion.query(`UPDATE productos
+      SET stock_disponible = stock_disponible + ?, stock_minimo = ?, proveedor_id = ?, dias_reposicion_estimados = ?
+      WHERE id = ? AND activo = 1`, [unidadesAgregar, minimo, proveedorId, dias, id]);
+    if (!resultado.affectedRows) { await conexion.rollback(); return res.status(404).json({ error: 'No se encontró el producto.' }); }
+    const [[fila]] = await conexion.query('SELECT stock_disponible AS stockDisponible, stock_minimo AS stockMinimo FROM productos WHERE id = ?', [id]);
+    if (Number(fila.stockDisponible) > 0) {
+      await conexion.query(`UPDATE pedidos_anticipados SET estado = 'producto_disponible'
+        WHERE producto_id = ? AND estado = 'pendiente_reposicion'`, [id]);
+    }
+    await conexion.commit();
+    res.json({
+      ok: true,
+      id,
+      stockDisponible: Number(fila.stockDisponible),
+      stockMinimo: Number(fila.stockMinimo),
+      unidadesAgregadas: unidadesAgregar,
+    });
+  } catch (error) {
+    await conexion.rollback();
+    console.error('Error al incrementar stock:', error.message);
+    res.status(500).json({ error: 'No se pudo incrementar el stock.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  } finally {
+    conexion.release();
+  }
+});
+
+app.patch('/api/admin/productos/:id/destacado', async (req, res) => {
+  const adminId = Number(req.body?.adminId);
+  if (!await verificarPermisoAdmin(req, 'gestionar_productos', adminId)) return res.status(403).json({ error: 'No tenés permiso para elegir los productos destacados.' });
+  const id = Number(req.params.id);
+  const destacado = Boolean(req.body?.destacado);
+  const orden = Number(req.body?.orden || 0);
+  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(orden) || orden < 0) return res.status(400).json({ error: 'El producto o el orden no son válidos.' });
+  try {
+    const [r] = await db.query('UPDATE productos SET destacado_dia = ?, destacado_orden = ? WHERE id = ? AND activo = 1', [destacado ? 1 : 0, orden, id]);
+    if (!r.affectedRows) return res.status(404).json({ error: 'No se encontró el producto.' });
+    res.json({ ok: true, id, destacadoDia: destacado, destacadoOrden: orden });
+  } catch (error) {
+    res.status(500).json({ error: 'No se pudo actualizar el destacado del día.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.post('/api/admin/pedidos-proveedor', async (req, res) => {
+  const adminId = Number(req.body?.adminId);
+  if (!await verificarPermisoAdmin(req, 'solicitar_compras', adminId)) return res.status(403).json({ error: 'No tenés permiso para solicitar reposiciones a proveedores.' });
+  const proveedorId = Number(req.body?.proveedorId);
+  const tipo = req.body?.tipo === 'pedido_grande' ? 'pedido_grande' : 'reposicion';
+  const fechaEstimada = String(req.body?.fechaEstimadaRecepcion || '').trim();
   const notas = String(req.body?.notas || '').trim();
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
-  if (!proveedor || proveedor.length > 150 || notas.length > 500 || items.length < 1 || items.length > 50) return res.status(400).json({ error: 'Indicá un proveedor y entre 1 y 50 materias primas.' });
-  const normalizados = items.map((item) => ({ insumoId: Number(item.insumoId), cantidad: Number(item.cantidad) }));
-  if (normalizados.some((item) => !Number.isInteger(item.insumoId) || item.insumoId <= 0 || !Number.isFinite(item.cantidad) || item.cantidad <= 0)) return res.status(400).json({ error: 'Todas las cantidades de compra deben ser mayores a cero.' });
+  if (!Number.isInteger(proveedorId) || proveedorId <= 0 || items.length < 1 || items.length > 50 || notas.length > 500 || (fechaEstimada && !/^\d{4}-\d{2}-\d{2}$/.test(fechaEstimada))) return res.status(400).json({ error: 'Elegí proveedor, fecha estimada válida y al menos un producto.' });
+  const agregados = new Map();
+  for (const item of items) {
+    const productoId = Number(item.productoId);
+    const cantidad = Number(item.cantidad);
+    if (!Number.isInteger(productoId) || productoId <= 0 || !Number.isInteger(cantidad) || cantidad <= 0 || cantidad > 100000) return res.status(400).json({ error: 'Cada producto debe tener una cantidad entera mayor a cero.' });
+    agregados.set(productoId, (agregados.get(productoId) || 0) + cantidad);
+  }
   const conexion = await db.getConnection();
   try {
     await conexion.beginTransaction();
-    for (const item of normalizados) {
-      const [[existe]] = await conexion.query('SELECT id FROM insumos WHERE id = ? AND activo = 1', [item.insumoId]);
-      if (!existe) throw new Error(`No existe el insumo con ID ${item.insumoId}.`);
+    const [[proveedor]] = await conexion.query('SELECT id FROM proveedores WHERE id = ? AND activo = 1', [proveedorId]);
+    if (!proveedor) { await conexion.rollback(); return res.status(404).json({ error: 'El proveedor no existe o está inactivo.' }); }
+    for (const productoId of agregados.keys()) {
+      const [[producto]] = await conexion.query('SELECT id FROM productos WHERE id = ? AND activo = 1', [productoId]);
+      if (!producto) throw new Error(`No existe el producto ID ${productoId}.`);
     }
-    const numero = `INS-${Date.now()}`;
-    const [cabecera] = await conexion.query(`INSERT INTO compras_insumos (numero, proveedor, estado, notas, creado_por_usuario_id)
-      VALUES (?, ?, 'solicitado', ?, ?)`, [numero, proveedor, notas || null, adminId]);
-    for (const item of normalizados) await conexion.query('INSERT INTO detalle_compras_insumos (compra_id, insumo_id, cantidad) VALUES (?, ?, ?)', [cabecera.insertId, item.insumoId, item.cantidad]);
+    const numero = `PR-${Date.now().toString().slice(-12)}`;
+    const [cabecera] = await conexion.query(`INSERT INTO pedidos_proveedor (numero, proveedor_id, tipo, estado, fecha_estimada_recepcion, notas, creado_por_usuario_id)
+      VALUES (?, ?, ?, 'solicitado', ?, ?, ?)`, [numero, proveedorId, tipo, fechaEstimada || null, notas || null, adminId]);
+    for (const [productoId, cantidad] of agregados) await conexion.query('INSERT INTO detalle_pedidos_proveedor (pedido_proveedor_id, producto_id, cantidad_solicitada) VALUES (?, ?, ?)', [cabecera.insertId, productoId, cantidad]);
+    if (fechaEstimada) for (const productoId of agregados.keys()) await conexion.query(`UPDATE pedidos_anticipados SET fecha_estimada_reposicion = ?, plazo_estimado_dias = ?, estado = 'pendiente_reposicion' WHERE producto_id = ? AND estado = 'pendiente_reposicion'`, [fechaEstimada, diasHastaFecha(fechaEstimada), productoId]);
     await conexion.commit();
-    res.status(201).json({ ok: true, id: cabecera.insertId, numero, estado: 'solicitado' });
+    res.status(201).json({ ok: true, id: cabecera.insertId, numero, estado: 'solicitado', tipo, fechaEstimadaRecepcion: fechaEstimada || null });
   } catch (error) {
     await conexion.rollback();
-    console.error('Error al crear compra de insumos:', error.message);
-    res.status(500).json({ error: error.message || 'No se pudo crear la solicitud de compra.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+    console.error('Error al crear pedido a proveedor:', error.message);
+    res.status(500).json({ error: error.message || 'No se pudo registrar el pedido al proveedor.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   } finally { conexion.release(); }
 });
 
-app.patch('/api/admin/compras-insumos/:id/estado', async (req, res) => {
+app.patch('/api/admin/pedidos-proveedor/:id/estado', async (req, res) => {
   const adminId = Number(req.body?.adminId);
-  if (!await verificarPermisoAdmin(req, 'solicitar_compras', adminId)) return res.status(403).json({ error: 'No tenés permiso para actualizar compras de insumos.' });
+  if (!await verificarPermisoAdmin(req, 'solicitar_compras', adminId)) return res.status(403).json({ error: 'No tenés permiso para actualizar pedidos a proveedores.' });
   const id = Number(req.params.id);
-  const nuevoEstado = String(req.body?.estado || '');
-  if (!Number.isInteger(id) || id <= 0 || !['recibido', 'cancelado'].includes(nuevoEstado)) return res.status(400).json({ error: 'El pedido o estado no es válido.' });
+  const estado = String(req.body?.estado || '');
+  if (!Number.isInteger(id) || id <= 0 || !['confirmado', 'en_camino', 'recibido', 'cancelado'].includes(estado)) return res.status(400).json({ error: 'El pedido o estado no son válidos.' });
   const conexion = await db.getConnection();
   try {
     await conexion.beginTransaction();
-    const [[compra]] = await conexion.query('SELECT id, estado FROM compras_insumos WHERE id = ? FOR UPDATE', [id]);
-    if (!compra) { await conexion.rollback(); return res.status(404).json({ error: 'No se encontró la solicitud de compra.' }); }
-    if (compra.estado === 'recibido') { await conexion.rollback(); return res.status(409).json({ error: 'La compra ya fue recibida y el stock ya se actualizó.' }); }
-    if (compra.estado === 'cancelado') { await conexion.rollback(); return res.status(409).json({ error: 'La compra ya está cancelada.' }); }
-    if (nuevoEstado === 'recibido') {
-      const [items] = await conexion.query('SELECT insumo_id, cantidad FROM detalle_compras_insumos WHERE compra_id = ?', [id]);
-      for (const item of items) await conexion.query('UPDATE insumos SET stock_actual = stock_actual + ? WHERE id = ?', [item.cantidad, item.insumo_id]);
+    const [[pedido]] = await conexion.query('SELECT id, estado FROM pedidos_proveedor WHERE id = ? FOR UPDATE', [id]);
+    if (!pedido) { await conexion.rollback(); return res.status(404).json({ error: 'No se encontró el pedido al proveedor.' }); }
+    if (pedido.estado === 'recibido' || pedido.estado === 'cancelado') { await conexion.rollback(); return res.status(409).json({ error: `El pedido ya está ${pedido.estado}.` }); }
+    if (estado === 'recibido') {
+      const [items] = await conexion.query('SELECT producto_id, cantidad_solicitada FROM detalle_pedidos_proveedor WHERE pedido_proveedor_id = ?', [id]);
+      for (const item of items) {
+        await conexion.query('UPDATE productos SET stock_disponible = stock_disponible + ? WHERE id = ?', [Number(item.cantidad_solicitada), item.producto_id]);
+        await conexion.query(`UPDATE pedidos_anticipados SET estado = 'producto_disponible' WHERE producto_id = ? AND estado = 'pendiente_reposicion'`, [item.producto_id]);
+        await conexion.query('UPDATE detalle_pedidos_proveedor SET cantidad_recibida = cantidad_solicitada WHERE pedido_proveedor_id = ? AND producto_id = ?', [id, item.producto_id]);
+      }
     }
-    await conexion.query('UPDATE compras_insumos SET estado = ? WHERE id = ?', [nuevoEstado, id]);
+    await conexion.query('UPDATE pedidos_proveedor SET estado = ?, recibido_en = IF(? = \'recibido\', NOW(), recibido_en) WHERE id = ?', [estado, estado, id]);
     await conexion.commit();
-    res.json({ ok: true, id, estado: nuevoEstado, stockActualizado: nuevoEstado === 'recibido' });
+    res.json({ ok: true, id, estado, stockActualizado: estado === 'recibido' });
   } catch (error) {
     await conexion.rollback();
-    console.error('Error al cambiar estado de compra de insumos:', error.message);
-    res.status(500).json({ error: 'No se pudo actualizar la compra.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+    console.error('Error al actualizar pedido a proveedor:', error.message);
+    res.status(500).json({ error: 'No se pudo actualizar el pedido al proveedor.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
   } finally { conexion.release(); }
 });
+
+// Pedidos anticipados: el cliente reserva una cantidad cuando el producto está agotado.
+app.post('/api/pedidos-anticipados', async (req, res) => {
+  const usuarioId = Number(req.body?.usuarioId);
+  const productoId = Number(req.body?.productoId);
+  const cantidad = Number(req.body?.cantidad);
+  const fechaDeseada = String(req.body?.fechaDeseada || '').trim();
+  const modalidad = req.body?.modalidadEntrega === 'envio' ? 'envio' : 'retiro';
+  const direccion = String(req.body?.direccion || '').trim();
+  const localidad = String(req.body?.localidad || '').trim();
+  const metodoPago = String(req.body?.metodoPago || '');
+  const notas = String(req.body?.notas || '').trim();
+  if (!verificarSesionPropia(req, usuarioId)) return res.status(401).json({ error: 'Iniciá sesión para realizar un pedido anticipado.' });
+  if (!Number.isInteger(productoId) || productoId <= 0 || !Number.isInteger(cantidad) || cantidad < 1 || cantidad > 100 || !/^\d{4}-\d{2}-\d{2}$/.test(fechaDeseada) || !METODOS_PAGO_VALIDOS.includes(metodoPago) || notas.length > 500) return res.status(400).json({ error: 'Completá producto, cantidad, fecha y medio de pago válidos.' });
+  if (modalidad === 'envio' && (!direccion || !localidad || direccion.length > 200 || localidad.length > 100)) return res.status(400).json({ error: 'Completá la dirección y localidad para el envío.' });
+  try {
+    const [[usuario]] = await db.query('SELECT id FROM usuarios WHERE id = ? AND activo = 1', [usuarioId]);
+    if (!usuario) return res.status(404).json({ error: 'La cuenta no existe o está inactiva.' });
+    const disponibilidad = await calcularReposicionProducto(productoId);
+    if (!disponibilidad) return res.status(404).json({ error: 'El producto ya no está disponible.' });
+    if (Number(disponibilidad.stockDisponible) > 0) return res.status(409).json({ error: 'El producto volvió a tener stock. Podés agregarlo al carrito y comprarlo normalmente.' });
+    const tienda = await obtenerConfiguracionTienda();
+    if (!tienda.metodosPago[metodoPago]) return res.status(400).json({ error: 'Ese medio de pago no está habilitado por la tienda.' });
+    if (modalidad === 'envio' && !tienda.envioHabilitado) return res.status(400).json({ error: 'La tienda no tiene habilitado el envío a domicilio.' });
+    const numero = `ESP-${Date.now().toString().slice(-12)}`;
+    const [r] = await db.query(`INSERT INTO pedidos_anticipados (numero, usuario_id, producto_id, cantidad, fecha_deseada,
+      modalidad_entrega, direccion, localidad, metodo_pago, fecha_estimada_reposicion, plazo_estimado_dias, estado, notas)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente_reposicion', ?)`,
+      [numero, usuarioId, productoId, cantidad, fechaDeseada, modalidad, modalidad === 'envio' ? direccion : null,
+       modalidad === 'envio' ? localidad : null, metodoPago, disponibilidad.fechaEstimada, disponibilidad.diasEstimados, notas || null]);
+    res.status(201).json({ ok: true, id: r.insertId, numero, usuarioId, productoId, cantidad, estado: 'pendiente_reposicion', fechaEstimada: disponibilidad.fechaEstimada, diasEstimados: disponibilidad.diasEstimados, proveedor: disponibilidad.proveedorNombre });
+  } catch (error) {
+    console.error('Error al registrar pedido anticipado:', error.message);
+    res.status(500).json({ error: 'No se pudo registrar el pedido anticipado.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.get('/api/usuarios/:id/pedidos-anticipados', async (req, res) => {
+  const usuarioId = Number(req.params.id);
+  if (!await exigirSesionUsuario(req, res, usuarioId)) return;
+  try {
+    const [lista] = await db.query(`SELECT pa.id, pa.numero, pa.usuario_id AS usuarioId, pa.producto_id AS productoId,
+      p.nombre AS producto, pa.cantidad, pa.fecha_deseada AS fechaDeseada, pa.modalidad_entrega AS modalidadEntrega,
+      pa.direccion, pa.localidad, pa.metodo_pago AS metodoPago, pa.fecha_estimada_reposicion AS fechaEstimada,
+      pa.plazo_estimado_dias AS plazoEstimadoDias, pa.estado, pa.creado_en AS creadoEn
+      FROM pedidos_anticipados pa INNER JOIN productos p ON p.id = pa.producto_id
+      WHERE pa.usuario_id = ? ORDER BY pa.creado_en DESC`, [usuarioId]);
+    res.json(lista.map((p) => ({ ...p, fechaDeseada: fechaComoSQL(p.fechaDeseada), fechaEstimada: fechaComoSQL(p.fechaEstimada) })));
+  } catch (error) {
+    res.status(500).json({ error: 'No se pudieron consultar tus pedidos anticipados.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.patch('/api/admin/pedidos-anticipados/:id/estado', async (req, res) => {
+  const adminId = Number(req.body?.adminId);
+  if (!await verificarPermisoAdmin(req, 'gestionar_pedidos', adminId)) return res.status(403).json({ error: 'No tenés permiso para actualizar pedidos anticipados.' });
+  const id = Number(req.params.id);
+  const estado = String(req.body?.estado || '');
+  if (!Number.isInteger(id) || id <= 0 || !['confirmado', 'cancelado'].includes(estado)) return res.status(400).json({ error: 'El ID o estado no son válidos.' });
+  const conexion = await db.getConnection();
+  try {
+    await conexion.beginTransaction();
+    const [[pedido]] = await conexion.query('SELECT id, producto_id AS productoId, cantidad, estado FROM pedidos_anticipados WHERE id = ? FOR UPDATE', [id]);
+    if (!pedido) { await conexion.rollback(); return res.status(404).json({ error: 'No se encontró el pedido anticipado.' }); }
+    if (!['pendiente_reposicion', 'producto_disponible'].includes(pedido.estado)) {
+      await conexion.rollback();
+      return res.status(409).json({ error: `El pedido ya está ${pedido.estado} y no se puede modificar.` });
+    }
+    if (estado === 'confirmado') {
+      if (pedido.estado !== 'producto_disponible') {
+        await conexion.rollback();
+        return res.status(409).json({ error: 'Todavía no se recibió la reposición. No se puede confirmar este pedido.' });
+      }
+      const [[producto]] = await conexion.query('SELECT stock_disponible AS stockDisponible, nombre FROM productos WHERE id = ? AND activo = 1 FOR UPDATE', [pedido.productoId]);
+      if (!producto) { await conexion.rollback(); return res.status(404).json({ error: 'El producto ya no está disponible.' }); }
+      if (Number(producto.stockDisponible || 0) < Number(pedido.cantidad)) {
+        await conexion.rollback();
+        return res.status(409).json({ error: `No hay unidades suficientes para confirmar. Disponibles: ${Number(producto.stockDisponible || 0)}.` });
+      }
+      await conexion.query('UPDATE productos SET stock_disponible = stock_disponible - ? WHERE id = ?', [Number(pedido.cantidad), pedido.productoId]);
+    }
+    await conexion.query('UPDATE pedidos_anticipados SET estado = ? WHERE id = ?', [estado, id]);
+    await conexion.commit();
+    res.json({ ok: true, id, estado, stockReservado: estado === 'confirmado' });
+  } catch (error) {
+    await conexion.rollback().catch(() => {});
+    console.error('Error al actualizar pedido anticipado:', error.message);
+    res.status(500).json({ error: 'No se pudo actualizar el pedido anticipado.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  } finally { conexion.release(); }
+});
+
+// Las rutas de inventario de materias primas fueron retiradas. El stock se administra por producto terminado.
 
 // Registro de cuentas.
 app.post('/api/auth/registro', async (req, res) => {

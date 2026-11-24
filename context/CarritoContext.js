@@ -6,20 +6,38 @@ const CarritoContext = createContext();
 export function CarritoProvider({ children }) {
   const [items, setItems] = useState([]); // { id, nombre, precio, cantidad, seleccionado, ... }
 
+  const stockDe = (producto) => Math.max(0, Number(producto?.stockDisponible ?? producto?.stock_disponible ?? 0));
+
   const agregarAlCarrito = (producto, cantidad = 1) => {
+    const maximo = stockDe(producto);
+    const unidades = Math.max(1, Math.floor(Number(cantidad) || 1));
+    if (maximo <= 0) return false;
+    const existente = items.find((i) => String(i.id) === String(producto.id));
+    const cantidadActual = Number(existente?.cantidad || 0);
+    if (cantidadActual >= maximo) return false;
+    const nuevaCantidad = Math.min(maximo, cantidadActual + unidades);
     setItems((prev) => {
-      const existente = prev.find((i) => i.id === producto.id);
-      if (existente) {
-        return prev.map((i) => (i.id === producto.id ? { ...i, cantidad: i.cantidad + cantidad } : i));
-      }
-      return [...prev, { ...producto, cantidad, seleccionado: true }];
+      const encontrado = prev.some((i) => String(i.id) === String(producto.id));
+      if (encontrado) return prev.map((i) => String(i.id) === String(producto.id) ? { ...i, ...producto, cantidad: nuevaCantidad } : i);
+      return [...prev, { ...producto, cantidad: Math.min(unidades, maximo), seleccionado: true }];
     });
+    return true;
   };
 
   const quitarDelCarrito = (id) => setItems((prev) => prev.filter((i) => i.id !== id));
 
-  const cambiarCantidad = (id, delta) =>
-    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, cantidad: Math.max(1, i.cantidad + delta) } : i)));
+  const cambiarCantidad = (id, delta, stockActualizado = null) => {
+    const actual = items.find((i) => String(i.id) === String(id));
+    if (!actual) return false;
+    const maximo = stockActualizado == null ? stockDe(actual) : Math.max(0, Number(stockActualizado) || 0);
+    const actualCantidad = Number(actual.cantidad || 1);
+    // Siempre permite bajar la cantidad; para subir respeta el stock más reciente del catálogo.
+    const propuesta = Math.max(1, actualCantidad + Number(delta || 0));
+    const nueva = Number(delta) < 0 ? propuesta : Math.min(maximo, propuesta);
+    if (nueva < 1 || (Number(delta) > 0 && maximo <= 0)) return false;
+    setItems((prev) => prev.map((i) => String(i.id) === String(id) ? { ...i, cantidad: nueva } : i));
+    return nueva !== Number(actual.cantidad || 1);
+  };
 
   const toggleSeleccionado = (id) =>
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, seleccionado: !i.seleccionado } : i)));

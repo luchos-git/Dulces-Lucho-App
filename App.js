@@ -33,7 +33,8 @@ import AdminVentasScreen from './screens/AdminVentasScreen';
 import AdminReportesScreen from './screens/AdminReportesScreen';
 import AdminTiendaScreen from './screens/AdminTiendaScreen';
 import AdminPermisosScreen from './screens/AdminPermisosScreen';
-import AdminInsumosScreen from './screens/AdminInsumosScreen';
+import AdminStockScreen from './screens/AdminStockScreen';
+import PedidoAgotadoScreen from './screens/PedidoAgotadoScreen';
 import DatosTiendaScreen from './screens/DatosTiendaScreen';
 import AyudaScreen from './screens/AyudaScreen';
 import FacturasScreen from './screens/FacturasScreen';
@@ -100,6 +101,7 @@ function Navegacion() {
             <Stack.Screen name="Bienvenida" component={BienvenidaScreen} options={{ headerShown: false }} />
             <Stack.Screen name="Inicio" component={HomeScreen} />
             <Stack.Screen name="Carrito" component={CarritoScreen} />
+            <Stack.Screen name="PedidoAgotado" component={PedidoAgotadoScreen} options={{ title: 'Realizar pedido' }} />
             <Stack.Screen
               name="DetalleProducto"
               component={DetalleProducto}
@@ -120,7 +122,7 @@ function Navegacion() {
             <Stack.Screen name="AdminReportes" component={AdminReportesScreen} options={{ title: 'Reportes y estadísticas' }} />
             <Stack.Screen name="AdminTienda" component={AdminTiendaScreen} options={{ title: 'Configuración de la tienda' }} />
             <Stack.Screen name="AdminPermisos" component={AdminPermisosScreen} options={{ title: 'Permisos de empleados' }} />
-            <Stack.Screen name="AdminInsumos" component={AdminInsumosScreen} options={{ title: 'Inventario y compras grandes' }} />
+            <Stack.Screen name="AdminStock" component={AdminStockScreen} options={{ title: 'Stock y proveedores' }} />
             <Stack.Screen name="DatosTienda" component={DatosTiendaScreen} options={{ title: 'Acerca de Dulces Lucho' }} />
             <Stack.Screen name="Ayuda" component={AyudaScreen} options={{ title: 'Ayuda y soporte' }} />
             <Stack.Screen name="Facturas" component={FacturasScreen} options={{ title: 'Facturas y comprobantes' }} />

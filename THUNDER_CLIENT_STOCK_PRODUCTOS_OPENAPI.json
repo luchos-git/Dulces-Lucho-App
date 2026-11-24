@@ -1,0 +1,614 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Dulces Lucho - Stock y pedidos",
+    "version": "1.0.0",
+    "description": "Pruebas de stock de productos terminados, productos destacados, proveedores y solicitudes por productos agotados."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000/api",
+      "description": "Backend local"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT o token de sesión de la app"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "StockProducto": {
+        "type": "object",
+        "required": [
+          "adminId",
+          "stockDisponible"
+        ],
+        "properties": {
+          "adminId": {
+            "type": "integer",
+            "example": 9
+          },
+          "stockDisponible": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 25
+          },
+          "stockMinimo": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 5
+          },
+          "proveedorId": {
+            "type": "integer",
+            "nullable": true,
+            "example": 1
+          },
+          "diasReposicionEstimados": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 120,
+            "example": 7
+          }
+        }
+      },
+      "DestacadoProducto": {
+        "type": "object",
+        "required": [
+          "adminId",
+          "destacado"
+        ],
+        "properties": {
+          "adminId": {
+            "type": "integer",
+            "example": 9
+          },
+          "destacado": {
+            "type": "boolean",
+            "example": true
+          },
+          "orden": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 1
+          }
+        }
+      },
+      "Proveedor": {
+        "type": "object",
+        "required": [
+          "nombre"
+        ],
+        "properties": {
+          "nombre": {
+            "type": "string",
+            "example": "Distribuidora Ejemplo"
+          },
+          "contacto": {
+            "type": "string"
+          },
+          "telefono": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "localidad": {
+            "type": "string"
+          },
+          "plazoEntregaDias": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 120,
+            "example": 5
+          }
+        }
+      },
+      "PedidoProveedor": {
+        "type": "object",
+        "required": [
+          "adminId",
+          "proveedorId",
+          "items"
+        ],
+        "properties": {
+          "adminId": {
+            "type": "integer",
+            "example": 9
+          },
+          "proveedorId": {
+            "type": "integer",
+            "example": 1
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "reposicion",
+              "pedido_grande"
+            ]
+          },
+          "fechaEstimadaRecepcion": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-12-01"
+          },
+          "notas": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": [
+                "productoId",
+                "cantidad"
+              ],
+              "properties": {
+                "productoId": {
+                  "type": "integer",
+                  "example": 12
+                },
+                "cantidad": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "example": 30
+                }
+              }
+            }
+          }
+        }
+      },
+      "EstadoPedidoProveedor": {
+        "type": "object",
+        "required": [
+          "adminId",
+          "estado"
+        ],
+        "properties": {
+          "adminId": {
+            "type": "integer",
+            "example": 9
+          },
+          "estado": {
+            "type": "string",
+            "enum": [
+              "confirmado",
+              "en_camino",
+              "recibido",
+              "cancelado"
+            ]
+          }
+        }
+      },
+      "PedidoAnticipado": {
+        "type": "object",
+        "required": [
+          "usuarioId",
+          "productoId",
+          "cantidad",
+          "fechaDeseada",
+          "modalidadEntrega",
+          "metodoPago"
+        ],
+        "properties": {
+          "usuarioId": {
+            "type": "integer",
+            "example": 3
+          },
+          "productoId": {
+            "type": "integer",
+            "example": 12
+          },
+          "cantidad": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "example": 2
+          },
+          "fechaDeseada": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-12-03"
+          },
+          "modalidadEntrega": {
+            "type": "string",
+            "enum": [
+              "retiro",
+              "envio"
+            ]
+          },
+          "direccion": {
+            "type": "string"
+          },
+          "localidad": {
+            "type": "string"
+          },
+          "metodoPago": {
+            "type": "string",
+            "enum": [
+              "credito",
+              "debito",
+              "rapipago"
+            ]
+          },
+          "notas": {
+            "type": "string"
+          }
+        }
+      },
+      "EstadoPedidoAnticipado": {
+        "type": "object",
+        "required": [
+          "adminId",
+          "estado"
+        ],
+        "properties": {
+          "adminId": {
+            "type": "integer",
+            "example": 9
+          },
+          "estado": {
+            "type": "string",
+            "enum": [
+              "confirmado",
+              "cancelado"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/estado": {
+      "get": {
+        "summary": "Comprobar backend y MySQL",
+        "responses": {
+          "200": {
+            "description": "Servidor conectado"
+          }
+        }
+      }
+    },
+    "/productos": {
+      "get": {
+        "summary": "Listar productos y sus existencias",
+        "responses": {
+          "200": {
+            "description": "Catálogo con stock y destacados"
+          }
+        }
+      }
+    },
+    "/productos/{id}/disponibilidad": {
+      "get": {
+        "summary": "Consultar disponibilidad y reposición estimada",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stock, proveedor y fecha estimada"
+          },
+          "404": {
+            "description": "Producto no encontrado"
+          }
+        }
+      }
+    },
+    "/admin/abastecimiento": {
+      "get": {
+        "summary": "Consultar productos, proveedores, reposiciones y solicitudes anticipadas",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "adminId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 9
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Información de abastecimiento"
+          },
+          "403": {
+            "description": "Permisos insuficientes"
+          }
+        }
+      }
+    },
+    "/admin/productos/{id}/stock": {
+      "patch": {
+        "summary": "Actualizar stock, mínimo y proveedor de un producto",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StockProducto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stock actualizado"
+          },
+          "403": {
+            "description": "Permisos insuficientes"
+          },
+          "404": {
+            "description": "Producto no encontrado"
+          }
+        }
+      }
+    },
+    "/admin/productos/{id}/destacado": {
+      "patch": {
+        "summary": "Activar o quitar un producto de la calesita del día",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DestacadoProducto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Destacado actualizado"
+          },
+          "403": {
+            "description": "Permisos insuficientes"
+          }
+        }
+      }
+    },
+    "/admin/proveedores": {
+      "post": {
+        "summary": "Registrar un proveedor (solo propietario)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Proveedor"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Proveedor creado"
+          },
+          "403": {
+            "description": "Solo propietario"
+          }
+        }
+      }
+    },
+    "/admin/pedidos-proveedor": {
+      "post": {
+        "summary": "Registrar reposición o pedido grande a un proveedor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PedidoProveedor"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Pedido registrado"
+          },
+          "403": {
+            "description": "Permisos insuficientes"
+          }
+        }
+      }
+    },
+    "/admin/pedidos-proveedor/{id}/estado": {
+      "patch": {
+        "summary": "Cambiar estado de una solicitud al proveedor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstadoPedidoProveedor"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Estado actualizado; al recibir se agrega el stock"
+          },
+          "409": {
+            "description": "Pedido ya cerrado"
+          }
+        }
+      }
+    },
+    "/pedidos-anticipados": {
+      "post": {
+        "summary": "Cliente solicita un producto agotado",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PedidoAnticipado"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Solicitud registrada sin cobro ni reserva de stock"
+          },
+          "409": {
+            "description": "El producto volvió a tener stock"
+          }
+        }
+      }
+    },
+    "/usuarios/{id}/pedidos-anticipados": {
+      "get": {
+        "summary": "Consultar las solicitudes propias de un cliente",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Solicitudes del usuario autenticado"
+          },
+          "401": {
+            "description": "La sesión no corresponde a ese usuario"
+          }
+        }
+      }
+    },
+    "/admin/pedidos-anticipados/{id}/estado": {
+      "patch": {
+        "summary": "Confirmar solicitud (reserva y descuenta stock) o cancelar",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstadoPedidoAnticipado"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Solicitud actualizada"
+          },
+          "409": {
+            "description": "No se recibió reposición o no hay unidades suficientes"
+          }
+        }
+      }
+    }
+  }
+}

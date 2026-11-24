@@ -12,12 +12,17 @@ export default function HistorialPedidosScreen({ navigation }) {
   const { usuario } = useAuth();
   const [cargando, setCargando] = useState(true);
   const [actualizando, setActualizando] = useState(false);
+  const [pedidosAnticipados, setPedidosAnticipados] = useState([]);
 
   const cargar = useCallback(async () => {
     if (!usuario?.id) { setCargando(false); return; }
     try {
-      const remotos = await api(`/usuarios/${usuario.id}/pedidos`);
+      const [remotos, anticipados] = await Promise.all([
+        api(`/usuarios/${usuario.id}/pedidos`),
+        api(`/usuarios/${usuario.id}/pedidos-anticipados`),
+      ]);
       sincronizarPedidos(remotos);
+      setPedidosAnticipados(Array.isArray(anticipados) ? anticipados : []);
     } catch (error) {
       Alert.alert('No se pudo actualizar el historial', error.message);
     } finally {
@@ -26,13 +31,19 @@ export default function HistorialPedidosScreen({ navigation }) {
     }
   }, [usuario?.id, sincronizarPedidos]);
 
-  useEffect(() => { setCargando(true); cargar(); }, [cargar]);
+  useEffect(() => {
+    setCargando(true);
+    cargar();
+    const quitarListener = navigation.addListener('focus', cargar);
+    return quitarListener;
+  }, [navigation, cargar]);
 
   const pedidosUsuario = pedidos.filter((pedido) =>
     String(pedido.usuarioId ?? pedido.usuario_id ?? '') === String(usuario?.id ?? '')
   );
   const activos = pedidosUsuario.filter((p) => !['entregado', 'cancelado'].includes(p.estadoPedido || p.estado));
   const historial = pedidosUsuario.filter((p) => ['entregado', 'cancelado'].includes(p.estadoPedido || p.estado));
+  const estadoAnticipado = { pendiente_reposicion: 'Esperando reposición', producto_disponible: 'Producto disponible', confirmado: 'Confirmado por la tienda', cancelado: 'Cancelado' };
 
   const lista = (titulo, elementos) => (
     <>
@@ -55,6 +66,17 @@ export default function HistorialPedidosScreen({ navigation }) {
       {cargando && <View style={styles.cargando}><ActivityIndicator color="#A86616" /><Text style={styles.vacio}>Actualizando desde MySQL...</Text></View>}
       {lista('Pedidos en curso', activos)}
       {lista('Historial de pedidos', historial)}
+      <Text style={styles.tituloSeccion}>Pedidos por reposición</Text>
+      {pedidosAnticipados.length ? pedidosAnticipados.map((pedido) => (
+        <View key={`reposicion-${usuario?.id}-${pedido.id}`} style={styles.tarjeta}>
+          <Text style={styles.numero}>Solicitud {pedido.numero} · Producto: {pedido.producto}</Text>
+          <Text style={styles.identificador}>ID de solicitud: #{pedido.id} · Cuenta: #{pedido.usuarioId}</Text>
+          <Text>{pedido.cantidad} unidad(es) · {estadoAnticipado[pedido.estado] || pedido.estado}</Text>
+          <Text style={styles.detalle}>Fecha solicitada: {String(pedido.fechaDeseada).slice(0, 10)} · Llegada estimada: {pedido.fechaEstimada ? String(pedido.fechaEstimada).slice(0, 10) : 'A confirmar'}</Text>
+          <Text style={styles.detalle}>{pedido.modalidadEntrega === 'envio' ? `Envío a ${pedido.direccion}, ${pedido.localidad}` : 'Retiro en el local'} · Pago preferido: {pedido.metodoPago}</Text>
+          <Text style={styles.detalle}>{pedido.estado === 'confirmado' ? 'La tienda confirmó la solicitud y reservó las unidades.' : 'La solicitud no se cobra ni reserva stock hasta que la tienda confirme la disponibilidad.'}</Text>
+        </View>
+      )) : <Text style={styles.vacio}>Todavía no hiciste solicitudes de productos agotados.</Text>}
     </ScrollView>
   );
 }

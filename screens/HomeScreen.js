@@ -5,6 +5,7 @@ import { useProductos } from '../context/ProductosContext';
 import { api } from '../services/api';
 import SliderImagenes from '../components/SliderImagenes';
 import SliderBanners from '../components/SliderBanners';
+import CarruselProductos from '../components/CarruselProductos';
 
 // Recupera las fotos de los distintos formatos que pudieron quedar guardados en la base anterior.
 function obtenerImagenesProducto(producto) {
@@ -88,20 +89,14 @@ export default function HomeScreen({ navigation }) {
     <ScrollView style={styles.container} contentContainerStyle={styles.contenidoScroll}>
       <SliderBanners banners={banners} />
 
-      <Text style={styles.tituloSeccion}>Ofertas del día</Text>
-      <View style={styles.fila}>
-        {productos.slice(0, 2).map((prod) => (
-          <View key={prod.id} style={styles.card}>
-            <TouchableOpacity style={styles.contenidoProducto} activeOpacity={0.85} onPress={() => irADetalle(prod)}>
-              {obtenerImagenesProducto(prod).length ? <SliderImagenes imagenes={obtenerImagenesProducto(prod)} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
-              <Text numberOfLines={1}>{prod.nombre}</Text>
-            </TouchableOpacity>
-            <View pointerEvents="none" style={styles.precioNoInteractivo}>
-              <Text style={styles.precio}>${prod.precio}</Text>
-            </View>
-          </View>
-        ))}
-      </View>
+      <CarruselProductos
+        titulo="Productos del día"
+        productos={productos
+          .filter((p) => Boolean(p.destacadoDia))
+          .sort((a, b) => Number(a.destacadoOrden || 0) - Number(b.destacadoOrden || 0) || String(a.nombre).localeCompare(String(b.nombre)))}
+        onPress={irADetalle}
+        textoAccion="Ver producto"
+      />
 
       <Text style={styles.tituloSeccion}>Filtrar</Text>
 
@@ -154,7 +149,10 @@ export default function HomeScreen({ navigation }) {
             {categoriasAgrupadas[nombreCategoria].map((prod) => (
               <View key={prod.id} style={styles.cardGrid}>
                 <TouchableOpacity style={styles.contenidoProducto} activeOpacity={0.85} onPress={() => irADetalle(prod)}>
-                  {obtenerImagenesProducto(prod).length ? <SliderImagenes imagenes={obtenerImagenesProducto(prod)} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
+                  <View style={styles.marcoImagen}>
+                    {obtenerImagenesProducto(prod).length ? <SliderImagenes imagenes={obtenerImagenesProducto(prod)} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
+                    {Number(prod.stockDisponible ?? prod.stock_disponible ?? 0) <= 0 && <View pointerEvents="none" style={styles.capaAgotado}><Text style={styles.textoAgotado}>AGOTADO</Text></View>}
+                  </View>
                   <Text style={styles.nombreProd} numberOfLines={2}>{prod.nombre}</Text>
                 </TouchableOpacity>
                 <View pointerEvents="none" style={styles.precioNoInteractivo}>
@@ -194,7 +192,10 @@ const styles = StyleSheet.create({
 
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingHorizontal: 10, paddingBottom: 10 },
   cardGrid: { width: '48%', backgroundColor: '#fff', padding: 10, alignItems: 'center', borderRadius: 10, marginBottom: 12 },
-  fotoPlaceholder: { width: '100%', height: 100, backgroundColor: '#FFE8C5', justifyContent: 'center', alignItems: 'center', borderRadius: 6, marginBottom: 6 },
+  marcoImagen: { width: '100%', height: 100, borderRadius: 6, overflow: 'hidden', marginBottom: 6, position: 'relative' },
+  fotoPlaceholder: { width: '100%', height: '100%', backgroundColor: '#FFE8C5', justifyContent: 'center', alignItems: 'center', borderRadius: 6 },
+  capaAgotado: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(45,33,24,0.58)', alignItems: 'center', justifyContent: 'center' },
+  textoAgotado: { color: '#fff', fontWeight: '900', fontSize: 17, letterSpacing: 1 },
   emojiFoto: { fontSize: 42 },
   nombreProd: { textAlign: 'center', marginBottom: 2 },
   precioNoInteractivo: { alignSelf: 'center', minHeight: 24, justifyContent: 'center' },

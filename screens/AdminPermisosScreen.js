@@ -12,8 +12,8 @@ const PERMISOS = [
   ['gestionar_empleados', 'Habilitar o pausar empleados administradores'],
   ['gestionar_banners', 'Banners del inicio'],
   ['configurar_tienda', 'Configuración de la tienda'],
-  ['gestionar_insumos', 'Inventario e ingredientes'],
-  ['solicitar_compras', 'Solicitar compras grandes'],
+  ['gestionar_insumos', 'Administrar stock de productos y proveedores'],
+  ['solicitar_compras', 'Solicitar reposiciones y pedidos grandes a proveedores'],
 ];
 
 export default function AdminPermisosScreen() {

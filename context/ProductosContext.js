@@ -30,7 +30,18 @@ function normalizarImagenes(producto = {}) {
   }).map((url) => String(url || '').trim()).filter((url) => /^https?:\/\//i.test(url));
   if (!urls.length && principal && /^https?:\/\//i.test(principal)) urls.push(principal);
   const imagenes = [...new Set(urls)].slice(0, 3);
-  return { ...producto, imagenes, imagenUrl: imagenes[0] || '', miniaturaUrl: imagenes[0] || '' };
+  return {
+    ...producto,
+    imagenes,
+    imagenUrl: imagenes[0] || '',
+    miniaturaUrl: imagenes[0] || '',
+    stockDisponible: Number(producto.stockDisponible ?? producto.stock_disponible ?? 0),
+    stockMinimo: Number(producto.stockMinimo ?? producto.stock_minimo ?? 0),
+    destacadoDia: Boolean(Number(producto.destacadoDia ?? producto.destacado_dia ?? 0)),
+    destacadoOrden: Number(producto.destacadoOrden ?? producto.destacado_orden ?? 0),
+    proveedorId: producto.proveedorId ?? producto.proveedor_id ?? null,
+    diasReposicionEstimados: Number(producto.diasReposicionEstimados ?? producto.dias_reposicion_estimados ?? 7),
+  };
 }
 
 export function ProductosProvider({ children }) {
