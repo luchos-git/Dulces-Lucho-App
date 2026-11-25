@@ -1,6 +1,9 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text } from '../context/ThemeContext';
 // Administración de ventas: lista compras guardadas en MySQL y permite actualizar su estado logístico.
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, RefreshControl, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 
@@ -31,7 +34,7 @@ export default function AdminVentasScreen() {
 
   if (cargando) return <View style={styles.centrado}><ActivityIndicator size="large" color="#A86616" /><Text>Cargando pedidos...</Text></View>;
   return (
-    <ScrollView style={styles.contenedor} contentContainerStyle={styles.contenido} refreshControl={<RefreshControl refreshing={actualizando} onRefresh={() => { setActualizando(true); cargar(); }} />}>
+    <ScrollView style={styles.contenedor} contentContainerStyle={[styles.contenido, { paddingBottom: 128 }]} refreshControl={<RefreshControl refreshing={actualizando} onRefresh={() => { setActualizando(true); cargar(); }} />} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <Text style={styles.titulo}>Pedidos y ventas</Text>
       <Text style={styles.descripcion}>Compras registradas en MySQL. Deslizá hacia abajo para actualizar.</Text>
       {ventas.length === 0 ? <View style={styles.vacio}><Text>No hay compras registradas todavía.</Text></View> : ventas.map((v) => {
@@ -58,4 +61,4 @@ export default function AdminVentasScreen() {
     </ScrollView>
   );
 }
-const styles = StyleSheet.create({ contenedor: { flex: 1, backgroundColor: '#FFF8E1' }, contenido: { padding: 16, paddingBottom: 30 }, centrado: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF8E1' }, titulo: { fontSize: 23, fontWeight: 'bold', color: '#38240D' }, descripcion: { color: '#765F43', marginTop: 5, marginBottom: 12 }, vacio: { backgroundColor: '#fff', borderRadius: 10, padding: 18 }, tarjeta: { backgroundColor: '#fff', padding: 14, borderRadius: 12, marginBottom: 11 }, fila: { flexDirection: 'row', justifyContent: 'space-between' }, numero: { color: '#35230E', fontWeight: 'bold', fontSize: 15 }, total: { color: '#A45F00', fontWeight: 'bold' }, cliente: { color: '#6B4B27', marginTop: 5, fontWeight: '600' }, detalle: { color: '#79664D', fontSize: 12, marginTop: 4 }, item: { color: '#51402C', fontSize: 12, marginTop: 3 }, botones: { marginTop: 10 }, boton: { backgroundColor: '#E8A23A', padding: 10, borderRadius: 8, alignItems: 'center' }, botonTexto: { color: '#38240D', fontWeight: 'bold', fontSize: 12 }, botonCancelar: { padding: 9, alignItems: 'center' }, cancelarTexto: { color: '#B64D3B', fontWeight: '600' } });
+const styles = createThemedStyles({ contenedor: { flex: 1, backgroundColor: '#FFF8E1' }, contenido: { padding: 16, paddingBottom: 30 }, centrado: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF8E1' }, titulo: { fontSize: 23, fontWeight: 'bold', color: '#38240D' }, descripcion: { color: '#765F43', marginTop: 5, marginBottom: 12 }, vacio: { backgroundColor: '#fff', borderRadius: 10, padding: 18 }, tarjeta: { backgroundColor: '#fff', padding: 14, borderRadius: 12, marginBottom: 11 }, fila: { flexDirection: 'row', justifyContent: 'space-between' }, numero: { color: '#35230E', fontWeight: 'bold', fontSize: 15 }, total: { color: '#A45F00', fontWeight: 'bold' }, cliente: { color: '#6B4B27', marginTop: 5, fontWeight: '600' }, detalle: { color: '#79664D', fontSize: 12, marginTop: 4 }, item: { color: '#51402C', fontSize: 12, marginTop: 3 }, botones: { marginTop: 10 }, boton: { backgroundColor: '#E8A23A', padding: 10, borderRadius: 8, alignItems: 'center' }, botonTexto: { color: '#38240D', fontWeight: 'bold', fontSize: 12 }, botonCancelar: { padding: 9, alignItems: 'center' }, cancelarTexto: { color: '#B64D3B', fontWeight: '600' } });

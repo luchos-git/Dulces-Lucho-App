@@ -5,14 +5,39 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true
     },
     "web": {
       "favicon": "./assets/images/favicon.png"
     },
-    "plugins": ["expo-status-bar", ["expo-image-picker", {"photosPermission":"Dulces Lucho usa tus fotos para publicar productos."}], ["expo-notifications", {"icon":"./assets/images/icon.png","color":"#c77b00"}]],
-    "android": {"adaptiveIcon":{"backgroundColor":"#FFF3D6","foregroundImage":"./assets/images/android-icon-foreground.png","monochromeImage":"./assets/images/android-icon-monochrome.png"},"permissions":["POST_NOTIFICATIONS"]}
+    "plugins": [
+      "expo-status-bar",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Dulces Lucho usa tus fotos para publicar productos."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#c77b00"
+        }
+      ]
+    ],
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FFF3D6",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "POST_NOTIFICATIONS"
+      ],
+      "softwareKeyboardLayoutMode": "resize"
+    }
   }
 }

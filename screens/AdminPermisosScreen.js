@@ -1,6 +1,9 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text } from '../context/ThemeContext';
 // Solo la cuenta principal puede delegar permisos a otras cuentas administradoras.
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 
@@ -52,7 +55,7 @@ export default function AdminPermisosScreen() {
   if (cargando) return <View style={styles.centrado}><ActivityIndicator size="large" color="#A86616" /><Text style={styles.ayuda}>Cargando empleados...</Text></View>;
 
   return (
-    <ScrollView style={styles.fondo} contentContainerStyle={styles.contenido}>
+    <ScrollView style={styles.fondo} contentContainerStyle={[styles.contenido, { paddingBottom: 128 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <View style={styles.aviso}><Text style={styles.avisoTitulo}>Cuenta principal</Text><Text style={styles.ayuda}>Hola {usuario?.nombre}. Solo vos podés decidir qué módulos puede usar cada empleado administrador. Un empleado sin permisos no puede ejecutar acciones administrativas.</Text></View>
       {empleados.length === 0 ? <View style={styles.tarjeta}><Text style={styles.texto}>Todavía no hay otras cuentas con rol administrador.</Text><Text style={styles.ayuda}>Primero debe crearse una cuenta de empleado con rol administrador y pasar su verificación de acceso.</Text></View> : empleados.map((empleado) => (
         <View key={empleado.id} style={styles.tarjeta}>
@@ -76,7 +79,7 @@ export default function AdminPermisosScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   fondo: { flex: 1, backgroundColor: '#FFF8E1' }, contenido: { padding: 16, paddingBottom: 40 },
   centrado: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF8E1', padding: 24 },
   aviso: { backgroundColor: '#FFE8B8', borderRadius: 12, padding: 15, marginBottom: 12 }, avisoTitulo: { color: '#71440B', fontSize: 18, fontWeight: 'bold', marginBottom: 5 },

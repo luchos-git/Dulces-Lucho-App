@@ -1,6 +1,8 @@
+import { ThemedText as Text } from '../context/ThemeContext';
 // explicación del archivo: muestra el saludo inicial después de ingresar y diferencia el mensaje de clientes y administradores
+import { createThemedStyles } from '../context/ThemeContext';
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 
 export default function BienvenidaScreen({ navigation }) {
@@ -33,7 +35,7 @@ export default function BienvenidaScreen({ navigation }) {
 }
 
 // estilos de la pantalla de bienvenida
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   container: { flex: 1, backgroundColor: '#FFF8E1', justifyContent: 'center', alignItems: 'center', padding: 24 },
   logo: { width: 230, height: 168 },
   etiqueta: { backgroundColor: '#c77b00', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 4, marginTop: 8 },

@@ -1,6 +1,9 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text } from '../context/ThemeContext';
 // Menú de configuración con accesos funcionales para clientes y administradores.
+import { createThemedStyles, useAppTheme } from '../context/ThemeContext';
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 
 function Opcion({ icono, titulo, detalle, onPress }) {
@@ -18,14 +21,41 @@ function Opcion({ icono, titulo, detalle, onPress }) {
 
 export default function ConfiguracionScreen({ navigation }) {
   const { usuario, esAdmin, esPropietario, puede } = useAuth();
+  const { themeName, cambiarTema } = useAppTheme();
   const irCuenta = (seccion) => navigation.navigate('ConfiguracionCuenta', { seccion });
 
   return (
-    <ScrollView style={styles.contenedor} contentContainerStyle={styles.contenido}>
+    <ScrollView style={styles.contenedor} contentContainerStyle={[styles.contenido, { paddingBottom: 128 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <View style={styles.encabezado}>
         <Text style={styles.titulo}>Configuración</Text>
         <Text style={styles.subtitulo}>Hola, {usuario?.nombre || 'usuario'}.</Text>
         <Text style={styles.descripcion}>Administrá tu cuenta y las opciones de Dulces Lucho.</Text>
+      </View>
+
+      <Text style={styles.seccion}>Apariencia</Text>
+      <View style={styles.aparienciaGrupo}>
+        <Text style={styles.aparienciaTitulo}>Elegí cómo querés ver Dulces Lucho</Text>
+        <Text style={styles.aparienciaDetalle}>El cambio se guarda en este dispositivo y se aplica a las pantallas de clientes y administración.</Text>
+        <View style={styles.temasFila}>
+          {[
+            { id: 'claro', nombre: 'Claro cálido', muestra: '#FFF8E1' },
+            { id: 'tibio', nombre: 'Tibio', muestra: '#E8D4BF' },
+            { id: 'oscuro', nombre: 'Oscuro', muestra: '#24211E' },
+          ].map((tema) => (
+            <TouchableOpacity
+              key={tema.id}
+              accessibilityRole="button"
+              accessibilityState={{ selected: themeName === tema.id }}
+              style={[styles.temaOpcion, themeName === tema.id && styles.temaOpcionActiva]}
+              onPress={() => cambiarTema(tema.id)}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.muestraTema, { backgroundColor: tema.muestra }]} />
+              <Text style={[styles.temaTexto, themeName === tema.id && styles.temaTextoActivo]}>{tema.nombre}</Text>
+              {themeName === tema.id && <Text style={styles.temaSeleccionado}>✓ Seleccionado</Text>}
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
       <Text style={styles.seccion}>Mi cuenta</Text>
@@ -73,7 +103,7 @@ export default function ConfiguracionScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   contenedor: { flex: 1, backgroundColor: '#FFF8E1' }, contenido: { padding: 16, paddingBottom: 30 },
   encabezado: { backgroundColor: '#FFE0B2', borderRadius: 14, padding: 18, marginBottom: 18 },
   titulo: { fontSize: 23, fontWeight: 'bold', color: '#38240D' }, subtitulo: { fontSize: 15, fontWeight: '600', color: '#80500F', marginTop: 6 },
@@ -83,4 +113,14 @@ const styles = StyleSheet.create({
   icono: { width: 38, fontSize: 21, textAlign: 'center', marginRight: 8 }, textosOpcion: { flex: 1 },
   sinPermisos: { color: '#806B4E', fontSize: 12, lineHeight: 18, paddingVertical: 14 },
   tituloOpcion: { color: '#35230E', fontSize: 14, fontWeight: '600' }, detalleOpcion: { color: '#888', fontSize: 11, marginTop: 3 }, flecha: { fontSize: 25, color: '#B17B32', paddingHorizontal: 7 },
+  aparienciaGrupo: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 8 },
+  aparienciaTitulo: { color: '#35230E', fontSize: 14, fontWeight: '700' },
+  aparienciaDetalle: { color: '#806B4E', fontSize: 11, lineHeight: 16, marginTop: 4, marginBottom: 12 },
+  temasFila: { flexDirection: 'row', gap: 8 },
+  temaOpcion: { flex: 1, borderWidth: 1, borderColor: '#E8D9C2', borderRadius: 10, padding: 9, alignItems: 'center', minHeight: 86 },
+  temaOpcionActiva: { borderColor: '#A86616', borderWidth: 2, backgroundColor: '#FFF0D8' },
+  muestraTema: { width: 26, height: 26, borderRadius: 13, borderWidth: 1, borderColor: '#D6C6B2', marginBottom: 7 },
+  temaTexto: { color: '#493116', fontSize: 11, fontWeight: '600', textAlign: 'center' },
+  temaTextoActivo: { color: '#80500F', fontWeight: '800' },
+  temaSeleccionado: { color: '#A86616', fontSize: 9, fontWeight: '700', marginTop: 4 },
 });

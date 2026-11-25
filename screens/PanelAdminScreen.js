@@ -1,16 +1,8 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text, ThemedTextInput as TextInput } from '../context/ThemeContext';
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  Alert,
-  Image,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Alert, Image, Modal, Pressable, StyleSheet, TouchableOpacity, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../context/AuthContext';
 import { useProductos } from '../context/ProductosContext';
@@ -91,19 +83,28 @@ export default function PanelAdminScreen({ route, navigation }) {
         Alert.alert('Permiso necesario', 'Permití el acceso a las fotos para elegir una imagen del producto.');
         return;
       }
+      const cantidadActual = (formulario.assets?.length || 0) + (formulario.imagenes?.length || (formulario.imagenUrl ? 1 : 0));
+      if (cantidadActual >= 3) {
+        Alert.alert('Límite de imágenes', 'Cada producto puede tener hasta 3 fotos. Quitá alguna para agregar otra.');
+        return;
+      }
+      // Se recorta una foto por vez; así Expo ImagePicker puede aplicar el recorte cuadrado.
       const resultado = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: false,
-        allowsMultipleSelection: true,
-        selectionLimit: 3,
+        allowsEditing: true,
+        aspect: [1, 1],
+        allowsMultipleSelection: false,
         quality: 0.7,
         base64: true,
+        exif: false,
       });
-      if (!resultado.canceled && resultado.assets?.length) {
-        const fotos = resultado.assets.slice(0, 3);
-        const pesada = fotos.find((foto) => foto.fileSize && foto.fileSize > 5 * 1024 * 1024);
-        if (pesada) { Alert.alert('Imagen demasiado grande', 'Cada imagen debe pesar hasta 5 MB.'); return; }
-        cambiarCampo('assets', fotos);
+      if (!resultado.canceled && resultado.assets?.[0]) {
+        const foto = resultado.assets[0];
+        if (foto.fileSize && foto.fileSize > 5 * 1024 * 1024) {
+          Alert.alert('Imagen demasiado grande', 'La imagen debe pesar hasta 5 MB.');
+          return;
+        }
+        cambiarCampo('assets', [...(formulario.assets || []), foto].slice(0, 3));
       }
     } catch (error) {
       Alert.alert('No se pudo abrir la galería', error.message);
@@ -129,10 +130,12 @@ export default function PanelAdminScreen({ route, navigation }) {
 
     setGuardando(true);
     try {
-      let imagenes = formulario.imagenes || (formulario.imagenUrl ? [formulario.imagenUrl] : []);
+      let imagenes = Array.isArray(formulario.imagenes) && formulario.imagenes.length
+        ? [...formulario.imagenes]
+        : (formulario.imagenUrl ? [formulario.imagenUrl] : []);
       if (formulario.assets.length) {
         const subidas = await Promise.all(formulario.assets.map((foto) => subirImagenProducto(foto)));
-        imagenes = subidas.map((subida) => subida.imagenUrl || subida.displayUrl);
+        imagenes = [...imagenes, ...subidas.map((subida) => subida.imagenUrl || subida.displayUrl)];
       }
       imagenes = imagenes.slice(0, 3);
       const imagenUrl = imagenes[0] || '';
@@ -200,7 +203,7 @@ export default function PanelAdminScreen({ route, navigation }) {
   }
 
   return (
-    <ScrollView ref={scrollRef} style={styles.container} keyboardShouldPersistTaps="handled">
+    <ScrollView ref={scrollRef} style={styles.container} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 128 }} keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <Text style={styles.title}>Panel de administración</Text>
       <Text style={styles.helper}>Sesión iniciada como {usuario?.nombre || 'administrador'}.</Text>
 
@@ -248,12 +251,12 @@ export default function PanelAdminScreen({ route, navigation }) {
 
         <Text style={styles.label}>Imagen del producto</Text>
         <TouchableOpacity style={styles.photoButton} onPress={elegirFoto}>
-          <Text style={styles.photoButtonText}>{formulario.assets.length || formulario.imagenes?.length ? 'Cambiar imágenes (máximo 3)' : 'Seleccionar hasta 3 imágenes'}</Text>
+          <Text style={styles.photoButtonText}>{formulario.assets.length || formulario.imagenes?.length ? 'Agregar foto recortada' : 'Seleccionar y recortar foto'}</Text>
         </TouchableOpacity>
-        <Text style={styles.helperSmall}>Podés elegir hasta 3 fotos. Cada una se sube a ImgBB al guardar y puede pesar hasta 5 MB.</Text>
+        <Text style={styles.helperSmall}>Podés agregar hasta 3 fotos, una por vez. Cada imagen se puede recortar antes de subirla a ImgBB.</Text>
         {(formulario.assets.length || formulario.imagenes?.length) ? (
           <View style={styles.previewContainer}>
-            {(formulario.assets.length ? formulario.assets.map((foto) => foto.uri) : formulario.imagenes).slice(0, 3).map((uri, indice) => <Image key={`${uri}-${indice}`} source={{ uri }} style={styles.preview} resizeMode="cover" />)}
+            {[...(formulario.imagenes || []), ...(formulario.assets || []).map((foto) => foto.uri)].slice(0, 3).map((uri, indice) => <Image key={`${uri}-${indice}`} source={{ uri }} style={styles.preview} resizeMode="cover" />)}
             <TouchableOpacity onPress={() => { cambiarCampo('assets', []); cambiarCampo('imagenes', []); cambiarCampo('imagenUrl', ''); }}>
               <Text style={styles.removePhoto}>Quitar imágenes</Text>
             </TouchableOpacity>
@@ -366,7 +369,7 @@ export default function PanelAdminScreen({ route, navigation }) {
 }
 
 // Mantiene los colores cálidos y las tarjetas sencillas del diseño original.
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   container: { flex: 1, backgroundColor: '#FFF8E1', padding: 20 },
   title: { fontSize: 22, fontWeight: 'bold', marginBottom: 6, color: '#33220D' },
   helper: { color: '#555', marginBottom: 8 },

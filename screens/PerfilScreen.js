@@ -1,9 +1,11 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text, ThemedTextInput as TextInput } from '../context/ThemeContext';
 // Perfil del cliente o administrador: datos personales, foto subida a ImgBB y cierre de sesión.
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useEffect, useState } from 'react';
-import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, StyleSheet, TouchableOpacity, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../context/AuthContext';
-import { useCarrito } from '../context/CarritoContext';
 import { cancelarAvisos } from '../services/notificaciones';
 import { subirImagenPerfil } from '../services/api';
 
@@ -13,7 +15,6 @@ function obtenerIniciales(nombre = '') {
 
 export default function PerfilScreen({ navigation }) {
   const { usuario, esAdmin, actualizarPerfil, actualizarFotoPerfil, cerrarSesion } = useAuth();
-  const { vaciarCarrito } = useCarrito();
   const [nombreEditado, setNombreEditado] = useState(usuario?.nombre || '');
   const [telefonoEditado, setTelefonoEditado] = useState(usuario?.telefono || '');
   const [guardandoPerfil, setGuardandoPerfil] = useState(false);
@@ -71,13 +72,12 @@ export default function PerfilScreen({ navigation }) {
   };
 
   const salir = () => {
-    Alert.alert('Cerrar sesión', '¿Querés salir de tu cuenta?', [
+    Alert.alert('Cerrar sesión', '¿Querés salir de tu cuenta? Tu carrito quedará guardado para cuando vuelvas a iniciar sesión.', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Cerrar sesión',
         style: 'destructive',
         onPress: () => {
-          vaciarCarrito();
           cancelarAvisos();
           cerrarSesion();
         },
@@ -92,7 +92,7 @@ export default function PerfilScreen({ navigation }) {
   const fotoPerfil = !errorFoto ? usuario.fotoPerfilUrl : '';
 
   return (
-    <ScrollView style={styles.contenedor} contentContainerStyle={styles.contenido}>
+    <ScrollView style={styles.contenedor} contentContainerStyle={[styles.contenido, { paddingBottom: 128 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <View style={styles.tarjetaPerfil}>
         <TouchableOpacity style={[styles.avatar, esAdmin && styles.avatarAdmin]} onPress={cambiarFoto} activeOpacity={0.8} disabled={subiendoFoto}>
           {fotoPerfil ? (
@@ -154,7 +154,7 @@ export default function PerfilScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   contenedor: { flex: 1, backgroundColor: '#FFF8E1' },
   contenido: { padding: 18, paddingBottom: 30 },
   contenedorVacio: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF8E1' },

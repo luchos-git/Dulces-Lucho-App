@@ -1,6 +1,9 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text, ThemedTextInput as TextInput } from '../context/ThemeContext';
 // explicación del archivo: pide y verifica la clave única de seis números antes de habilitar la sesión de administrador
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import CampoPassword from '../components/CampoPassword';
 
@@ -48,7 +51,8 @@ export default function ClaveAdminScreen({ navigation }) {
 
   // muestra el campo de seis números y el mensaje de error cuando corresponde
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={[styles.contenido, { paddingBottom: 128 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
+      <View style={styles.cuerpo}>
       <Text style={styles.icono}>🔐</Text>
       <Text style={styles.titulo}>Verificación de administrador</Text>
       <Text style={styles.texto}>
@@ -76,13 +80,16 @@ export default function ClaveAdminScreen({ navigation }) {
       <TouchableOpacity style={styles.botonLink} onPress={volver}>
         <Text style={styles.linkTexto}>Volver</Text>
       </TouchableOpacity>
-    </View>
+      </View>
+    </ScrollView>
   );
 }
 
 // estilos de la pantalla de verificación
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8E1', justifyContent: 'center', padding: 24 },
+const styles = createThemedStyles({
+  container: { flex: 1, backgroundColor: '#FFF8E1' },
+  contenido: { flexGrow: 1, justifyContent: 'center', padding: 24, paddingBottom: 128 },
+  cuerpo: { width: '100%' },
   icono: { fontSize: 48, textAlign: 'center' },
   titulo: { fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginVertical: 8 },
   texto: { textAlign: 'center', color: '#555', marginBottom: 18 },

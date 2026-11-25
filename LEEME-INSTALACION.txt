@@ -1,0 +1,21 @@
+DULCES LUCHO - ACTUALIZACION DEL SEGUIMIENTO DE PEDIDOS
+
+Archivos incluidos:
+- screens/SeguimientoPedido.js
+- screens/HistorialPedidosScreen.js
+
+QUE CAMBIA
+1. La pantalla Seguimiento consulta el estado del pedido en MySQL al entrar y cada 5 segundos mientras permanece abierta.
+2. Cuando administración avanza o cancela un pedido, el usuario verá el nuevo estado en el seguimiento sin tener que salir y volver a entrar (el refresco automático puede tardar hasta 5 segundos).
+3. Se agrega el gesto de deslizar hacia abajo para actualizar manualmente el seguimiento.
+4. El historial de pedidos también sincroniza sus estados cada 5 segundos mientras está abierto y permite actualizar manualmente con el mismo gesto.
+
+INSTALACION
+1. Hacé una copia de seguridad de los dos archivos originales.
+2. Extraé el ZIP en la carpeta raíz de Dulces-Lucho-App.
+3. Reemplazá los archivos conservando la carpeta screens.
+4. No hace falta modificar la base de datos, el backend ni los archivos .env.
+5. Reiniciá Expo limpiando caché: npx expo start --lan -c
+
+NOTA
+La actualización es automática mediante consultas periódicas a la API (polling), no mediante WebSocket. Por eso el cambio puede demorar hasta 5 segundos en aparecer. La pantalla debe permanecer abierta y el celular debe tener conexión con el backend.

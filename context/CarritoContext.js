@@ -1,10 +1,53 @@
 // explicación del archivo: guarda los productos del carrito y permite agregar, quitar, seleccionar y cambiar cantidades
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from './AuthContext';
 
 const CarritoContext = createContext();
+const CLAVE_CARRITO = 'dulces_lucho_carrito_usuario_';
 
 export function CarritoProvider({ children }) {
+  const { usuario } = useAuth();
+  const usuarioId = usuario?.id != null ? String(usuario.id) : '';
   const [items, setItems] = useState([]); // { id, nombre, precio, cantidad, seleccionado, ... }
+  const [carritoCargadoPara, setCarritoCargadoPara] = useState('');
+
+  // Cada cuenta conserva su propio carrito. Al cerrar sesión se oculta, pero no se borra.
+  // Al volver a entrar o reiniciar Expo, se recupera desde el almacenamiento del teléfono.
+  useEffect(() => {
+    let vigente = true;
+    setItems([]);
+    setCarritoCargadoPara('');
+
+    if (!usuarioId) return () => { vigente = false; };
+
+    AsyncStorage.getItem(`${CLAVE_CARRITO}${usuarioId}`)
+      .then((guardado) => {
+        if (!vigente) return;
+        let lista = [];
+        try {
+          const parseado = guardado ? JSON.parse(guardado) : [];
+          lista = Array.isArray(parseado) ? parseado : [];
+        } catch {
+          lista = [];
+        }
+        setItems(lista);
+        setCarritoCargadoPara(usuarioId);
+      })
+      .catch((error) => {
+        console.warn('No se pudo recuperar el carrito guardado:', error?.message || error);
+        if (vigente) setCarritoCargadoPara(usuarioId);
+      });
+
+    return () => { vigente = false; };
+  }, [usuarioId]);
+
+  // No guarda el estado vacío temporal mientras se está leyendo la cuenta nueva.
+  useEffect(() => {
+    if (!usuarioId || carritoCargadoPara !== usuarioId) return;
+    AsyncStorage.setItem(`${CLAVE_CARRITO}${usuarioId}`, JSON.stringify(items))
+      .catch((error) => console.warn('No se pudo guardar el carrito:', error?.message || error));
+  }, [items, usuarioId, carritoCargadoPara]);
 
   const stockDe = (producto) => Math.max(0, Number(producto?.stockDisponible ?? producto?.stock_disponible ?? 0));
 
@@ -50,7 +93,7 @@ export function CarritoProvider({ children }) {
   // Saca del carrito los productos que se acaban de comprar
   const quitarSeleccionados = () => setItems((prev) => prev.filter((i) => !i.seleccionado));
 
-  // Vacía todo el carrito (se usa al cerrar sesión)
+  // Vacía el carrito solo cuando se solicita expresamente; el cierre de sesión no lo llama.
   const vaciarCarrito = () => setItems([]);
 
   return (

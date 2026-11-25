@@ -1,6 +1,9 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text, ThemedTextInput as TextInput } from '../context/ThemeContext';
 // explicación del archivo: presenta el formulario para crear una cuenta de cliente o solicitar el alta de administrador con autorización
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import CampoPassword from '../components/CampoPassword';
 
@@ -50,7 +53,7 @@ export default function RegistroScreen({ navigation }) {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contenido} keyboardShouldPersistTaps="handled">
+    <ScrollView style={styles.container} contentContainerStyle={[styles.contenido, { paddingBottom: 128 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <Text style={styles.titulo}>Tipo de cuenta</Text>
       <View style={styles.filaTipos}>
         <TouchableOpacity
@@ -141,7 +144,7 @@ export default function RegistroScreen({ navigation }) {
 }
 
 // estilos del formulario y de los campos de autorización del administrador
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   container: { flex: 1, backgroundColor: '#FFF8E1' },
   contenido: { padding: 24 },
   titulo: { fontSize: 16, fontWeight: 'bold', marginBottom: 8 },

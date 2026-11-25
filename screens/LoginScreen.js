@@ -1,6 +1,9 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text, ThemedTextInput as TextInput } from '../context/ThemeContext';
 // explicación del archivo: presenta el formulario de inicio de sesión y deriva al paso de clave cuando la cuenta es administradora
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Image } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import CampoPassword from '../components/CampoPassword';
 
@@ -37,9 +40,9 @@ export default function LoginScreen({ navigation }) {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={styles.contenido}
+      contentContainerStyle={[styles.contenido, { paddingBottom: 128 }]}
       keyboardShouldPersistTaps="handled"
-    >
+     keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <Image source={require('../assets/images/logo.png')} style={styles.logo} resizeMode="contain" />
       <Text style={styles.titulo}>Iniciar sesión</Text>
 
@@ -80,7 +83,7 @@ export default function LoginScreen({ navigation }) {
 }
 
 // estilos de los campos, botones y textos de la pantalla
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   container: { flex: 1, backgroundColor: '#FFF8E1' },
   contenido: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   logo: { width: 230, height: 168, alignSelf: 'center', marginBottom: 16 },

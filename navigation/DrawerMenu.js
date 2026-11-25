@@ -1,6 +1,8 @@
+import { ThemedText as Text } from '../context/ThemeContext';
 // explicación del archivo: arma el menú lateral que permite moverse entre las secciones y cerrar sesión
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useEffect, useRef } from 'react';
-import { Animated, TouchableOpacity, TouchableWithoutFeedback, View, Text, StyleSheet, Dimensions } from 'react-native';
+import { Animated, TouchableOpacity, TouchableWithoutFeedback, View, StyleSheet, Dimensions } from 'react-native';
 
 const { width } = Dimensions.get('window');
 const DRAWER_WIDTH = width * 0.72;
@@ -43,7 +45,7 @@ export default function DrawerMenu({ visible, onClose, onNavigate, usuario, esAd
         <TouchableOpacity style={styles.item} onPress={() => onNavigate('MisPedidos')}><Text style={styles.itemText}>Mis pedidos</Text></TouchableOpacity>
         <TouchableOpacity style={styles.item} onPress={() => onNavigate('Perfil')}><Text style={styles.itemText}>Mi perfil</Text></TouchableOpacity>
         <TouchableOpacity style={styles.item} onPress={() => onNavigate('Configuracion')}><Text style={styles.itemText}>Configuración</Text></TouchableOpacity>
-        {esAdmin && (esPropietario || (typeof puede === 'function' && puede('gestionar_productos'))) && (esPropietario || (typeof puede === 'function' && puede('gestionar_productos'))) && (
+        {esAdmin && (esPropietario || (typeof puede === 'function' && puede('gestionar_productos'))) && (
           <TouchableOpacity style={styles.item} onPress={() => onNavigate('PanelAdmin')}>
             <Text style={styles.itemText}>Panel de administración</Text>
           </TouchableOpacity>
@@ -59,7 +61,7 @@ export default function DrawerMenu({ visible, onClose, onNavigate, usuario, esAd
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   drawer: { position: 'absolute', right: 0, top: 0, bottom: 0, width: DRAWER_WIDTH, backgroundColor: '#fff', elevation: 8, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 6 },
   header: { padding: 20, backgroundColor: '#007bff' },
   headerText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },

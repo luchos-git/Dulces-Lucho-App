@@ -1,6 +1,9 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text } from '../context/ThemeContext';
 // Muestra los comprobantes internos asociados exclusivamente a la cuenta que inició sesión.
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, RefreshControl, StyleSheet, View } from 'react-native';
 import { usePedido } from '../context/PedidoContext';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
@@ -8,6 +11,11 @@ import { api } from '../services/api';
 const ETIQUETAS = {
   confirmado: 'Confirmado', preparando: 'Preparando', en_camino: 'En camino',
   listo_para_retirar: 'Listo para retirar', entregado: 'Entregado', cancelado: 'Cancelado',
+};
+const NOMBRES_PAGO = {
+  credito: 'Tarjeta de crédito', debito: 'Tarjeta de débito', mercado_pago: 'Mercado Pago',
+  cuenta_dni: 'Cuenta DNI', modo: 'MODO', naranja_x: 'Naranja X', uala: 'Ualá',
+  transferencia: 'Transferencia bancaria', rapipago: 'Rapipago',
 };
 
 export default function FacturasScreen() {
@@ -42,8 +50,9 @@ export default function FacturasScreen() {
   return (
     <ScrollView
       style={styles.contenedor}
-      contentContainerStyle={styles.contenido}
+      contentContainerStyle={[styles.contenido, { paddingBottom: 128 }]}
       refreshControl={<RefreshControl refreshing={actualizando} onRefresh={() => { setActualizando(true); cargar(); }} />}
+      keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets
     >
       <Text style={styles.titulo}>Facturas y comprobantes</Text>
       <Text style={styles.descripcion}>
@@ -72,6 +81,12 @@ export default function FacturasScreen() {
             <Text style={styles.fecha}>
               {pedido.inicio ? new Date(pedido.inicio).toLocaleDateString() : 'Fecha no disponible'}
             </Text>
+            <Text style={styles.detallePedido}>Medio de pago: {NOMBRES_PAGO[pedido.metodoPago] || pedido.metodoPago || 'No indicado'}</Text>
+            {pedido.conEnvio && <>
+              <Text style={styles.detallePedido}>Entrega: {pedido.direccionAlias || 'Dirección'} · {pedido.direccion || ''}, {pedido.localidad || ''}</Text>
+              {!!pedido.direccionDestinatario && <Text style={styles.detallePedido}>Recibe: {pedido.direccionDestinatario}</Text>}
+              {!!pedido.instruccionesEntrega && <Text style={styles.detallePedido}>Notas: {pedido.instruccionesEntrega}</Text>}
+            </>}
             {(pedido.items || []).map((item, indice) => (
               <Text key={`${pedido.id}-${indice}`} style={styles.item}>
                 {item.cantidad} x {item.nombre} — ${Number(item.precio || 0) * Number(item.cantidad || 0)}
@@ -89,7 +104,7 @@ export default function FacturasScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   contenedor: { flex: 1, backgroundColor: '#FFF8E1' },
   contenido: { padding: 16, paddingBottom: 30 },
   titulo: { fontSize: 22, fontWeight: 'bold', color: '#35230E' },
@@ -106,6 +121,7 @@ const styles = StyleSheet.create({
   estado: { color: '#A66A12', fontSize: 12, fontWeight: '600' },
   identificador: { color: '#806B4E', fontSize: 11, marginTop: 4 },
   fecha: { color: '#888', fontSize: 11, marginTop: 4, marginBottom: 10 },
+  detallePedido: { color: '#806B4E', fontSize: 11, lineHeight: 16, marginTop: 3 },
   item: { color: '#55432B', fontSize: 13, marginBottom: 5 },
   totalFila: { flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#F1E7D8', marginTop: 10, paddingTop: 10 },
   totalEtiqueta: { fontWeight: '600', color: '#55432B' },

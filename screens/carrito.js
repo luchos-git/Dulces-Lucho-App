@@ -1,12 +1,20 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text } from '../context/ThemeContext';
 // Muestra el carrito y un carrusel desplazable de productos que todavía tienen stock.
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { createThemedStyles } from '../context/ThemeContext';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { useCarrito } from '../context/CarritoContext';
+import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
 import { useProductos } from '../context/ProductosContext';
 import EntregaEnvio, { useEntrega } from '../components/EntregaEnvio';
 import ModalAgregar from '../components/ModalAgregar';
 import SliderImagenes from '../components/SliderImagenes';
 import CarruselProductos from '../components/CarruselProductos';
+
+const esDireccionPredeterminada = (direccion) =>
+  direccion?.esPredeterminada === true || Number(direccion?.esPredeterminada) === 1;
 
 export default function CarritoScreen({ navigation }) {
   const {
@@ -18,15 +26,82 @@ export default function CarritoScreen({ navigation }) {
     toggleSeleccionarTodo,
   } = useCarrito();
   const { productos, cargarProductos } = useProductos();
+  const { usuario } = useAuth();
   const entrega = useEntrega();
   const [productoModal, setProductoModal] = useState(null);
+  const [direccionesGuardadas, setDireccionesGuardadas] = useState([]);
+  const [direccionSeleccionadaId, setDireccionSeleccionadaId] = useState(null);
+  const direccionEditadaManualmente = useRef(false);
+  const direccionSeleccionadaRef = useRef(null);
+  const direccionEraPredeterminadaRef = useRef(false);
+
+  const cargarProductosRef = useRef(cargarProductos);
+  cargarProductosRef.current = cargarProductos;
 
   useEffect(() => {
-    const actualizar = () => cargarProductos().catch((error) => console.warn('No se pudo actualizar el catálogo del carrito:', error.message));
+    const actualizar = () => {
+      cargarProductosRef.current().catch((error) =>
+        console.warn('No se pudo actualizar el catálogo del carrito:', error?.message || error)
+      );
+    };
+
     actualizar();
     const listener = navigation.addListener('focus', actualizar);
     return listener;
   }, [navigation]);
+
+  // Carga las direcciones del usuario y preselecciona la marcada como principal.
+  // Esta selección se utiliza en el carrito para calcular los kilómetros de envío.
+  useEffect(() => {
+    if (!usuario?.id) return undefined;
+    let vigente = true;
+    const cargarDirecciones = async () => {
+      try {
+        const lista = await api(`/usuarios/${usuario.id}/direcciones`);
+        if (!vigente) return;
+        const direcciones = Array.isArray(lista) ? lista : [];
+        setDireccionesGuardadas(direcciones);
+        if (!direccionEditadaManualmente.current) {
+          const principal = direcciones.find(esDireccionPredeterminada) || direcciones[0];
+          const seleccionAnterior = direccionSeleccionadaRef.current
+            ? direcciones.find((d) => String(d.id) === String(direccionSeleccionadaRef.current))
+            : null;
+          const elegida = direccionEraPredeterminadaRef.current
+            ? (principal || seleccionAnterior)
+            : (seleccionAnterior || principal);
+          if (elegida) {
+            setDireccionSeleccionadaId(elegida.id);
+            direccionSeleccionadaRef.current = elegida.id;
+            direccionEraPredeterminadaRef.current = esDireccionPredeterminada(elegida);
+            entrega.cambiarDireccion(elegida.direccion || '');
+            entrega.cambiarLocalidad(elegida.localidad || '');
+          }
+        }
+      } catch (error) {
+        console.warn('No se pudieron cargar las direcciones del carrito:', error?.message || error);
+      }
+    };
+    cargarDirecciones();
+    const listener = navigation.addListener('focus', cargarDirecciones);
+    return () => { vigente = false; listener(); };
+  }, [usuario?.id, navigation, entrega.cambiarDireccion, entrega.cambiarLocalidad]);
+
+  const seleccionarDireccion = (direccion) => {
+    direccionEditadaManualmente.current = false;
+    setDireccionSeleccionadaId(direccion.id);
+    direccionSeleccionadaRef.current = direccion.id;
+    direccionEraPredeterminadaRef.current = esDireccionPredeterminada(direccion);
+    entrega.cambiarDireccion(direccion.direccion || '');
+    entrega.cambiarLocalidad(direccion.localidad || '');
+    entrega.setConEnvio(true);
+  };
+
+  const marcarDireccionEditada = () => {
+    direccionEditadaManualmente.current = true;
+    direccionSeleccionadaRef.current = null;
+    direccionEraPredeterminadaRef.current = false;
+    setDireccionSeleccionadaId(null);
+  };
 
   // Cruza el carrito con el stock actual del servidor, por si otra persona compró las últimas unidades.
   const itemsActualizados = items.map((item) => {
@@ -87,13 +162,17 @@ export default function CarritoScreen({ navigation }) {
         conEnvio: entrega.conEnvio,
         direccion: entrega.direccion,
         localidad: entrega.localidad,
+        direccionGuardadaId: entrega.conEnvio ? direccionSeleccionadaId : null,
+        direccionGuardada: entrega.conEnvio
+          ? (direccionesGuardadas.find((direccion) => String(direccion.id) === String(direccionSeleccionadaId)) || null)
+          : null,
         envio: entrega.envio,
       },
     });
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contenido} keyboardShouldPersistTaps="handled">
+    <ScrollView style={styles.container} contentContainerStyle={[styles.contenido, { paddingBottom: 128 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       {itemsActualizados.length > 0 && (
         <TouchableOpacity style={styles.filaSeleccionarTodo} onPress={toggleSeleccionarTodo}>
           <View style={[styles.checkbox, todosSeleccionados && styles.checkboxActivo]}>
@@ -154,7 +233,23 @@ export default function CarritoScreen({ navigation }) {
 
       {itemsActualizados.length > 0 && (
         <View style={styles.cajaEnvio}>
-          <EntregaEnvio entrega={entrega} />
+          {direccionesGuardadas.length > 0 && (
+            <View style={styles.direccionesGuardadas}>
+              <Text style={styles.tituloDirecciones}>Mis direcciones guardadas</Text>
+              {direccionesGuardadas.map((direccion) => (
+                <TouchableOpacity
+                  key={direccion.id}
+                  style={[styles.tarjetaDireccion, Number(direccionSeleccionadaId) === Number(direccion.id) && styles.tarjetaDireccionActiva]}
+                  onPress={() => seleccionarDireccion(direccion)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.nombreDireccion}>{direccion.alias || 'Dirección'}{esDireccionPredeterminada(direccion) ? ' · Principal' : ''}</Text>
+                  <Text style={styles.textoDireccion}>{direccion.direccion}, {direccion.localidad}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          <EntregaEnvio entrega={entrega} mostrarDireccionLocal onDireccionEditada={marcarDireccionEditada} />
         </View>
       )}
 
@@ -191,7 +286,7 @@ export default function CarritoScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   container: { flex: 1, backgroundColor: '#FFF8E1' },
   contenido: { paddingBottom: 35 },
   filaSeleccionarTodo: { flexDirection: 'row', alignItems: 'center', padding: 14 },
@@ -220,6 +315,12 @@ const styles = StyleSheet.create({
   stepperTexto: { fontWeight: 'bold' },
   cantidadTexto: { marginHorizontal: 6 },
   cajaEnvio: { backgroundColor: '#fff', marginHorizontal: 10, marginBottom: 10, padding: 12, borderRadius: 10 },
+  direccionesGuardadas: { marginBottom: 12 },
+  tituloDirecciones: { fontWeight: 'bold', marginBottom: 8 },
+  tarjetaDireccion: { borderWidth: 1, borderColor: '#eadcc9', borderRadius: 8, padding: 9, marginBottom: 7 },
+  tarjetaDireccionActiva: { borderColor: '#B97719', backgroundColor: '#FFF3E0' },
+  nombreDireccion: { fontWeight: 'bold', fontSize: 13 },
+  textoDireccion: { fontSize: 12, marginTop: 3 },
   resumen: { marginHorizontal: 12, marginTop: 4 },
   avisoStock: { color: '#B42318', marginHorizontal: 12, marginTop: 8, fontSize: 12 },
   filaTotal: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 10, marginVertical: 14 },

@@ -1,19 +1,58 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Image } from 'react-native';
+import { ThemedText as Text } from '../context/ThemeContext';
+import { createThemedStyles } from '../context/ThemeContext';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, StyleSheet, ScrollView as NativeScrollView, TouchableOpacity, Alert, Image, Modal, Dimensions } from 'react-native';
+import ScrollView from '../components/GlobalRefreshScrollView';
 import { useCarrito } from '../context/CarritoContext';
 import { useProductos } from '../context/ProductosContext';
 import { useAuth } from '../context/AuthContext';
 import SliderImagenes from '../components/SliderImagenes';
+import CarruselProductos from '../components/CarruselProductos';
+import ModalAgregar from '../components/ModalAgregar';
 
 export default function DetalleProducto({ route, navigation }) {
   const { agregarAlCarrito } = useCarrito();
   const { productos, eliminarProducto } = useProductos();
   const { esAdmin } = useAuth();
   const [cantidad, setCantidad] = useState(1);
+  const [productoSugerido, setProductoSugerido] = useState(null);
+  const [visorImagenVisible, setVisorImagenVisible] = useState(false);
+  const [indiceImagenAmpliada, setIndiceImagenAmpliada] = useState(0);
+  const [zoomImagen, setZoomImagen] = useState(1);
   const productoInicial = route.params.producto;
   const producto = productos.find((item) => String(item.id) === String(productoInicial.id)) || productoInicial;
   const stockDisponible = Math.max(0, Number(producto.stockDisponible ?? producto.stock_disponible ?? 0));
   const agotado = stockDisponible <= 0;
+  const imagenesProducto = useMemo(() => {
+    let lista = producto.imagenes ?? producto.imagenesJson ?? producto.imagenes_json ?? [];
+    if (typeof lista === 'string') {
+      try { lista = JSON.parse(lista); } catch { lista = /^https?:\/\//i.test(lista) ? [lista] : []; }
+    }
+    if (!Array.isArray(lista)) lista = lista ? [lista] : [];
+    const urls = lista.map((item) => typeof item === 'string' ? item : (item?.url || item?.display_url || item?.displayUrl || item?.data?.url || ''));
+    const principal = producto.imagenUrl || producto.imagen_url || producto.miniaturaUrl || '';
+    return [...new Set([...urls, principal].filter((url) => /^https?:\/\//i.test(String(url || ''))))].slice(0, 3);
+  }, [producto]);
+  const cambiarFotoAmpliada = (paso) => {
+    if (imagenesProducto.length < 2) return;
+    setIndiceImagenAmpliada((actual) => (actual + paso + imagenesProducto.length) % imagenesProducto.length);
+    setZoomImagen(1);
+  };
+
+  // Se eligen hasta cinco productos disponibles al azar, excluyendo el actual.
+  // La selección se mantiene estable mientras no cambie el catálogo/producto.
+  const productosSugeridos = useMemo(() => {
+    const candidatos = productos.filter((item) =>
+      String(item.id) !== String(producto.id)
+      && Number(item.stockDisponible ?? item.stock_disponible ?? 0) > 0
+    );
+    const mezcla = [...candidatos];
+    for (let indice = mezcla.length - 1; indice > 0; indice -= 1) {
+      const aleatorio = Math.floor(Math.random() * (indice + 1));
+      [mezcla[indice], mezcla[aleatorio]] = [mezcla[aleatorio], mezcla[indice]];
+    }
+    return mezcla.slice(0, 5);
+  }, [productos, producto.id]);
 
   const sumar = () => setCantidad((actual) => Math.min(stockDisponible, actual + 1));
   const restar = () => setCantidad((actual) => (actual > 1 ? actual - 1 : 1));
@@ -26,6 +65,16 @@ export default function DetalleProducto({ route, navigation }) {
     const ok = agregarAlCarrito(producto, cantidad);
     if (!ok) { Alert.alert('Stock insuficiente', 'No quedan unidades suficientes de este producto.'); return; }
     Alert.alert('Agregado', `${cantidad} x ${producto.nombre} agregado al carrito.`);
+  };
+
+  const confirmarAgregadoSugerido = (cantidadSugerida) => {
+    const agregado = agregarAlCarrito(productoSugerido, cantidadSugerida);
+    setProductoSugerido(null);
+    if (!agregado) {
+      Alert.alert('Stock insuficiente', 'No quedan unidades suficientes de ese producto.');
+      return;
+    }
+    Alert.alert('Agregado', `${cantidadSugerida} x ${productoSugerido.nombre} agregado al carrito.`);
   };
 
   const comprarAhora = () => {
@@ -68,10 +117,15 @@ export default function DetalleProducto({ route, navigation }) {
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 128 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <View style={styles.marcoFotoGrande}>
-        {(producto.imagenes?.length || producto.imagenUrl) ? (
-          <SliderImagenes imagenes={producto.imagenes?.length ? producto.imagenes : [producto.imagenUrl]} style={styles.fotoGrande} resizeMode="cover" />
+        {imagenesProducto.length > 0 ? (
+          <SliderImagenes
+            imagenes={imagenesProducto}
+            style={styles.fotoGrande}
+            resizeMode="contain"
+            onPressImage={(_url, indice) => { setIndiceImagenAmpliada(indice); setZoomImagen(1); setVisorImagenVisible(true); }}
+          />
         ) : (
           <View style={styles.fotoGrande}>
             <Text>{producto.categoria === 'Jugos' ? '🧃' : producto.categoria === 'Combos' ? '🍬' : '🍫'}</Text>
@@ -128,21 +182,118 @@ export default function DetalleProducto({ route, navigation }) {
           </View>
         ) : null}
 
-        {!agotado && productos
-          .filter((item) => Number(item.stockDisponible ?? 0) > 0 && item.categoria === producto.categoria && String(item.id) !== String(producto.id))
-          .slice(0, 2)
-          .map((item) => (
-            <TouchableOpacity key={item.id} style={styles.parecido} onPress={() => navigation.push('DetalleProducto', { producto: item })}>
-              <Text>{item.nombre}</Text>
-              <Text style={styles.precio}>${item.precio}</Text>
-            </TouchableOpacity>
-          ))}
       </View>
+
+      {productosSugeridos.length > 0 && (
+        <CarruselProductos
+          titulo="También te puede interesar"
+          productos={productosSugeridos}
+          onPress={(item) => navigation.push('DetalleProducto', { producto: item })}
+          onAgregar={setProductoSugerido}
+        />
+      )}
+
+      <ModalAgregar
+        producto={productoSugerido}
+        maxCantidad={productoSugerido?.stockDisponible ?? productoSugerido?.stock_disponible ?? 0}
+        onCancelar={() => setProductoSugerido(null)}
+        onConfirmar={confirmarAgregadoSugerido}
+      />
+
+      <Modal
+        visible={visorImagenVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setVisorImagenVisible(false)}
+      >
+        <View style={styles.visorFondo}>
+          <View style={styles.visorCabecera}>
+            <TouchableOpacity onPress={() => setVisorImagenVisible(false)} style={styles.visorCerrar} accessibilityLabel="Cerrar imagen ampliada">
+              <Text style={styles.visorCerrarTexto}>×</Text>
+            </TouchableOpacity>
+            <Text style={styles.visorContador}>{imagenesProducto.length ? `${indiceImagenAmpliada + 1} / ${imagenesProducto.length}` : 'Imagen'}</Text>
+            <View style={styles.visorCerrar} />
+          </View>
+
+          <NativeScrollView
+            key={indiceImagenAmpliada}
+            style={styles.visorScrollHorizontal}
+            contentContainerStyle={styles.visorContenidoHorizontal}
+            horizontal
+            bounces={false}
+            showsHorizontalScrollIndicator={false}
+            scrollEnabled={zoomImagen > 1}
+            maximumZoomScale={3}
+            minimumZoomScale={1}
+          >
+            <NativeScrollView
+              style={[styles.visorScrollVertical, { width: (Dimensions.get('window').width - 24) * zoomImagen, height: Dimensions.get('window').height - 180 }]}
+              contentContainerStyle={styles.visorContenidoVertical}
+              bounces={false}
+              showsVerticalScrollIndicator={false}
+              scrollEnabled={zoomImagen > 1}
+            >
+              <TouchableOpacity activeOpacity={1} onPress={() => setZoomImagen((actual) => actual > 1 ? 1 : 2)}>
+                {imagenesProducto[indiceImagenAmpliada] ? (
+                  <Image
+                    source={{ uri: imagenesProducto[indiceImagenAmpliada] }}
+                    resizeMode="contain"
+                    style={[
+                      styles.visorImagen,
+                      {
+                        width: (Dimensions.get('window').width - 24) * zoomImagen,
+                        height: (Dimensions.get('window').height - 180) * zoomImagen,
+                      },
+                    ]}
+                  />
+                ) : null}
+              </TouchableOpacity>
+            </NativeScrollView>
+          </NativeScrollView>
+
+          <View style={styles.visorControles}>
+            <TouchableOpacity disabled={imagenesProducto.length < 2} onPress={() => cambiarFotoAmpliada(-1)} style={[styles.visorBoton, imagenesProducto.length < 2 && styles.visorBotonDeshabilitado]}>
+              <Text style={styles.visorBotonTexto}>‹</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setZoomImagen((actual) => Math.max(1, Number((actual - 0.5).toFixed(1))))} style={styles.visorBoton}>
+              <Text style={styles.visorBotonTexto}>−</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setZoomImagen(1)} style={styles.visorZoomEtiqueta}>
+              <Text style={styles.visorZoomTexto}>{Math.round(zoomImagen * 100)}%</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setZoomImagen((actual) => Math.min(3, Number((actual + 0.5).toFixed(1))))} style={styles.visorBoton}>
+              <Text style={styles.visorBotonTexto}>+</Text>
+            </TouchableOpacity>
+            <TouchableOpacity disabled={imagenesProducto.length < 2} onPress={() => cambiarFotoAmpliada(1)} style={[styles.visorBoton, imagenesProducto.length < 2 && styles.visorBotonDeshabilitado]}>
+              <Text style={styles.visorBotonTexto}>›</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.visorAyuda}>Tocá la imagen para ampliar o reducir. Usá + y − para ajustar el zoom.</Text>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
+  visorFondo: { flex: 1, backgroundColor: '#111111', paddingTop: 28, paddingBottom: 18 },
+  visorCabecera: { height: 48, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  visorCerrar: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
+  visorCerrarTexto: { color: '#FFFFFF', fontSize: 34, lineHeight: 38, fontWeight: '300' },
+  visorContador: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  visorScrollHorizontal: { flex: 1 },
+  visorContenidoHorizontal: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
+  visorScrollVertical: { flex: 1 },
+  visorContenidoVertical: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
+  visorImagen: { backgroundColor: '#111111' },
+  visorControles: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  visorBoton: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#383838', justifyContent: 'center', alignItems: 'center' },
+  visorBotonDeshabilitado: { opacity: 0.35 },
+  visorBotonTexto: { color: '#FFFFFF', fontSize: 25, fontWeight: '600' },
+  visorZoomEtiqueta: { minWidth: 60, alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8 },
+  visorZoomTexto: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  visorAyuda: { color: '#DDDDDD', fontSize: 11, textAlign: 'center', marginHorizontal: 16, marginBottom: 8 },
   container: { flex: 1, backgroundColor: '#FFF8E1' },
   marcoFotoGrande: { height: 260, backgroundColor: '#eee', position: 'relative', overflow: 'hidden' },
   fotoGrande: { width: '100%', height: '100%', backgroundColor: '#eee', justifyContent: 'center', alignItems: 'center' },
@@ -173,5 +324,4 @@ const styles = StyleSheet.create({
   textoBotonModificar: { color: '#3d2a0d', fontWeight: 'bold' },
   botonEliminar: { backgroundColor: '#fde8e7', padding: 13, borderRadius: 8, alignItems: 'center' },
   textoBotonEliminar: { color: '#b42318', fontWeight: 'bold' },
-  parecido: { backgroundColor: '#fff', borderRadius: 8, padding: 10, marginTop: 10 },
 });

@@ -1,6 +1,9 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text, ThemedTextInput as TextInput } from '../context/ThemeContext';
 // Permite modificar el Gmail, la contraseña o ambos después de pasar la protección de cuenta.
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import CampoPassword from '../components/CampoPassword';
 
@@ -68,7 +71,7 @@ export default function CambiarCredencialesScreen({ navigation, route }) {
   };
 
   return (
-    <ScrollView style={styles.fondo} contentContainerStyle={styles.contenido} keyboardShouldPersistTaps="handled">
+    <ScrollView style={styles.fondo} contentContainerStyle={[styles.contenido, { paddingBottom: 128 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <View style={styles.tarjeta}>
         <Text style={styles.titulo}>{tipoCambio === 'email' ? 'Cambiar Gmail' : tipoCambio === 'password' ? 'Cambiar contraseña' : 'Cambiar datos de acceso'}</Text>
         <Text style={styles.descripcion}>{tipoCambio === 'email' ? 'Actualizá el correo asociado a tu cuenta.' : tipoCambio === 'password' ? 'Elegí una contraseña nueva para proteger tu cuenta.' : 'Podés cambiar el Gmail, la contraseña o ambos.'}</Text>
@@ -130,7 +133,7 @@ export default function CambiarCredencialesScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   fondo: { flex: 1, backgroundColor: '#FFF8E1' },
   contenido: { flexGrow: 1, justifyContent: 'center', padding: 18 },
   tarjeta: { backgroundColor: '#fff', borderRadius: 15, padding: 20 },

@@ -1,6 +1,9 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text, ThemedTextInput as TextInput } from '../context/ThemeContext';
 // Pantalla obligatoria de verificación antes de modificar el correo o la contraseña.
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import CampoPassword from '../components/CampoPassword';
 
@@ -48,7 +51,7 @@ export default function ProteccionCuentaScreen({ navigation, route }) {
   };
 
   return (
-    <ScrollView style={styles.fondo} contentContainerStyle={styles.contenido} keyboardShouldPersistTaps="handled">
+    <ScrollView style={styles.fondo} contentContainerStyle={[styles.contenido, { paddingBottom: 128 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <View style={styles.tarjeta}>
         <Text style={styles.icono}>🔐</Text>
         <Text style={styles.titulo}>Protección de cuenta</Text>
@@ -112,7 +115,7 @@ export default function ProteccionCuentaScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   fondo: { flex: 1, backgroundColor: '#FFF8E1' },
   contenido: { flexGrow: 1, justifyContent: 'center', padding: 18 },
   tarjeta: { backgroundColor: '#fff', padding: 20, borderRadius: 16 },

@@ -1,15 +1,8 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text, ThemedTextInput as TextInput } from '../context/ThemeContext';
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 
@@ -59,6 +52,9 @@ export default function AdminStockScreen() {
   const [filtroProductos, setFiltroProductos] = useState('prioridad');
   const [busquedaProducto, setBusquedaProducto] = useState('');
   const [guardandoPedido, setGuardandoPedido] = useState(false);
+  const [pedidoParaRecibir, setPedidoParaRecibir] = useState(null);
+  const [procesandoRecepcion, setProcesandoRecepcion] = useState(false);
+  const [mensajeRecepcion, setMensajeRecepcion] = useState('');
 
   const cargar = useCallback(async () => {
     if (!usuario?.id) return;
@@ -241,22 +237,45 @@ export default function AdminStockScreen() {
   };
 
   const cambiarEstadoPedido = async (pedido, estado) => {
-    const ejecutar = async () => {
-      try {
-        await api(`/admin/pedidos-proveedor/${pedido.id}/estado`, { method: 'PATCH', body: JSON.stringify({ adminId: usuario.id, estado }) });
-        await cargar();
-        if (estado === 'recibido') Alert.alert('Mercadería recibida', 'Las unidades se sumaron automáticamente al stock de todos los productos del pedido.');
-      } catch (error) {
-        Alert.alert('No se pudo actualizar el pedido', error.message);
-      }
-    };
     if (estado === 'recibido') {
-      Alert.alert('Confirmar recepción', 'Solo marcá recibido cuando la mercadería haya llegado. Las cantidades se sumarán una sola vez al stock.', [
-        { text: 'Volver', style: 'cancel' },
-        { text: 'Recibí la mercadería', onPress: ejecutar },
-      ]);
-    } else {
-      ejecutar();
+      setMensajeRecepcion('');
+      setPedidoParaRecibir(pedido);
+      return;
+    }
+
+    try {
+      await api(`/admin/pedidos-proveedor/${pedido.id}/estado`, {
+        method: 'PATCH',
+        body: JSON.stringify({ adminId: usuario.id, estado }),
+      });
+      await cargar();
+    } catch (error) {
+      Alert.alert('No se pudo actualizar el pedido', error.message);
+    }
+  };
+
+  const confirmarRecepcionPedido = async () => {
+    const pedido = pedidoParaRecibir;
+    if (!pedido || procesandoRecepcion) return;
+
+    setProcesandoRecepcion(true);
+    setMensajeRecepcion('');
+
+    try {
+      const resultado = await api(`/admin/pedidos-proveedor/${pedido.id}/estado`, {
+        method: 'PATCH',
+        body: JSON.stringify({ adminId: usuario.id, estado: 'recibido' }),
+      });
+
+      setPedidoParaRecibir(null);
+      await cargar();
+      setMensajeRecepcion(
+        resultado?.mensaje || `La recepción del pedido ${pedido.numero} se registró correctamente. El servidor confirmó la operación.`
+      );
+    } catch (error) {
+      setMensajeRecepcion(`No se pudo registrar la recepción: ${error.message}`);
+    } finally {
+      setProcesandoRecepcion(false);
     }
   };
 
@@ -318,9 +337,10 @@ export default function AdminStockScreen() {
   };
 
   return (
-    <ScrollView style={styles.fondo} contentContainerStyle={styles.contenido} keyboardShouldPersistTaps="handled">
+    <ScrollView style={styles.fondo} contentContainerStyle={[styles.contenido, { paddingBottom: 128 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <Text style={styles.titulo}>Stock y proveedores</Text>
       <Text style={styles.descripcion}>Las ventas descuentan unidades automáticamente. Cuando recibís una reposición, el stock se suma una sola vez.</Text>
+      {!!mensajeRecepcion && <Text style={styles.resultadoRecepcion}>{mensajeRecepcion}</Text>}
 
       {/* RESUMEN Y PROVEEDORES PRIMERO: no hay que recorrer todos los productos para ver encargos. */}
       <View style={styles.resumenFila}>
@@ -408,23 +428,75 @@ export default function AdminStockScreen() {
             <TouchableOpacity style={styles.botonRecibir} onPress={() => cambiarEstadoPedido(p, 'recibido')}><Text style={styles.botonRecibirTexto}>Recibí mercadería (+ stock)</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => cambiarEstadoPedido(p, 'cancelado')}><Text style={styles.linkRojo}>Cancelar pedido</Text></TouchableOpacity>
           </View>}
+          {pedidoParaRecibir && String(pedidoParaRecibir.id) === String(p.id) && (
+            <View style={styles.confirmacionRecepcion}>
+              <Text style={styles.confirmacionTitulo}>¿Confirmás que llegó la mercadería?</Text>
+              <Text style={styles.ayuda}>
+                Al confirmar, se sumarán al inventario las unidades de todos los productos de este pedido.
+              </Text>
+              <View style={styles.filaAcciones}>
+                <TouchableOpacity
+                  style={styles.botonPequeno}
+                  onPress={() => setPedidoParaRecibir(null)}
+                  disabled={procesandoRecepcion}
+                >
+                  <Text style={styles.botonPequenoTexto}>Volver</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.botonRecibir, procesandoRecepcion && styles.deshabilitado]}
+                  onPress={confirmarRecepcionPedido}
+                  disabled={procesandoRecepcion}
+                >
+                  <Text style={styles.botonRecibirTexto}>
+                    {procesandoRecepcion ? 'Registrando recepción…' : 'Confirmar recepción y sumar stock'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
         </View>)}
         {!datos.pedidos.length && <Text style={styles.ayuda}>Todavía no hay pedidos a proveedores.</Text>}
       </>}
 
       {(esPropietario || puede('gestionar_pedidos')) && <>
         <Text style={styles.seccion}>Pedidos de clientes</Text>
-        {datos.anticipados.map((p) => <View key={p.id} style={styles.tarjeta}>
-          <Text style={styles.nombre}>{p.numero} · {p.cliente}</Text>
-          <Text style={styles.ayuda}>{p.cantidad} × {p.producto} · Cuenta #{p.usuarioId}</Text>
-          <Text style={styles.ayuda}>Necesita: {String(p.fechaDeseada).slice(0, 10)} · Reposición estimada: {p.fechaEstimada ? String(p.fechaEstimada).slice(0, 10) : 'A confirmar'}</Text>
-          <Text style={styles.ayuda}>{p.modalidadEntrega === 'envio' ? `Envío: ${p.direccion}, ${p.localidad}` : 'Retira en el local'} · Pago: ${p.metodoPago}</Text>
-          <Text style={styles.etiqueta}>{etiquetaEstadoAnticipado(p.estado)}</Text>
-          {['pendiente_reposicion', 'producto_disponible'].includes(p.estado) && <View style={styles.chips}>
-            {p.estado === 'producto_disponible' ? <TouchableOpacity style={styles.chipActivo} onPress={() => cambiarEstadoAnticipado(p, 'confirmado')}><Text style={styles.chipTexto}>Confirmar y reservar stock</Text></TouchableOpacity> : <Text style={styles.avisoBajo}>Esperando reposición: todavía no se puede confirmar.</Text>}
-            <TouchableOpacity style={styles.chip} onPress={() => cambiarEstadoAnticipado(p, 'cancelado')}><Text style={styles.chipTexto}>Cancelar</Text></TouchableOpacity>
-          </View>}
-        </View>)}
+        {datos.anticipados.map((p) => {
+          const acciones = accionesPedidoAnticipado(p);
+          return (
+            <View key={p.id} style={styles.tarjeta}>
+              <Text style={styles.nombre}>{p.numero} · {p.cliente}</Text>
+              <Text style={styles.ayuda}>{p.cantidad} × {p.producto} · Cuenta #{p.usuarioId}</Text>
+              <Text style={styles.ayuda}>Necesita: {String(p.fechaDeseada).slice(0, 10)} · Reposición estimada: {p.fechaEstimada ? String(p.fechaEstimada).slice(0, 10) : 'A confirmar'}</Text>
+              <Text style={styles.ayuda}>{p.modalidadEntrega === 'envio' ? `Envío: ${p.direccion}, ${p.localidad}` : 'Retira en el local'} · Pago: ${p.metodoPago}</Text>
+              <Text style={styles.etiqueta}>{etiquetaEstadoAnticipado(p.estado)}</Text>
+              {p.estado === 'pendiente_reposicion' && (
+                <Text style={styles.avisoBajo}>Esperando la reposición del proveedor. Todavía no se reservaron unidades.</Text>
+              )}
+              {p.estado === 'confirmado' && (
+                <Text style={styles.ayuda}>El stock ya está reservado para este cliente. El próximo paso es preparar el pedido.</Text>
+              )}
+              {p.estado === 'en_camino' && (
+                <Text style={styles.ayuda}>El pedido fue despachado. Falta registrar la entrega al cliente.</Text>
+              )}
+              {p.estado === 'listo_para_retirar' && (
+                <Text style={styles.ayuda}>El pedido está listo en el local. Falta registrar que el cliente lo retiró.</Text>
+              )}
+              {!!acciones.length && (
+                <View style={styles.chips}>
+                  {acciones.map((accion) => (
+                    <TouchableOpacity
+                      key={accion.estado}
+                      style={accion.principal ? styles.chipActivo : styles.chip}
+                      onPress={() => cambiarEstadoAnticipado(p, accion.estado)}
+                    >
+                      <Text style={styles.chipTexto}>{accion.texto}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+          );
+        })}
         {!datos.anticipados.length && <Text style={styles.ayuda}>Todavía no hay pedidos de clientes.</Text>}
       </>}
 
@@ -484,10 +556,53 @@ function etiquetaEstadoPedido(estado) {
   return ({ solicitado: 'Solicitado', confirmado: 'Proveedor confirmó', en_camino: 'En camino', recibido: 'Recibido', cancelado: 'Cancelado' })[estado] || estado;
 }
 function etiquetaEstadoAnticipado(estado) {
-  return ({ pendiente_reposicion: 'Esperando reposición', producto_disponible: 'Producto disponible', confirmado: 'Pedido confirmado', cancelado: 'Cancelado' })[estado] || estado;
+  return ({
+    pendiente_reposicion: 'Esperando reposición',
+    producto_disponible: 'Producto repuesto · pendiente de confirmación',
+    confirmado: 'Pedido confirmado · pendiente de preparación',
+    preparando: 'Preparando pedido',
+    en_camino: 'En camino',
+    listo_para_retirar: 'Listo para retirar',
+    entregado: 'Entregado',
+    cancelado: 'Cancelado',
+  })[estado] || estado;
 }
 
-const styles = StyleSheet.create({
+function accionesPedidoAnticipado(pedido) {
+  switch (pedido.estado) {
+    case 'pendiente_reposicion':
+      return [{ estado: 'cancelado', texto: 'Cancelar solicitud' }];
+    case 'producto_disponible':
+      return [
+        { estado: 'confirmado', texto: 'Confirmar y reservar stock', principal: true },
+        { estado: 'cancelado', texto: 'Cancelar solicitud' },
+      ];
+    case 'confirmado':
+      return [
+        { estado: 'preparando', texto: 'Comenzar preparación', principal: true },
+        { estado: 'cancelado', texto: 'Cancelar y devolver stock' },
+      ];
+    case 'preparando':
+      return [
+        {
+          estado: pedido.modalidadEntrega === 'envio' ? 'en_camino' : 'listo_para_retirar',
+          texto: pedido.modalidadEntrega === 'envio' ? 'Despachar · marcar en camino' : 'Marcar listo para retirar',
+          principal: true,
+        },
+        { estado: 'cancelado', texto: 'Cancelar y devolver stock' },
+      ];
+    case 'en_camino':
+    case 'listo_para_retirar':
+      return [{ estado: 'entregado', texto: 'Marcar como entregado', principal: true }];
+    default:
+      return [];
+  }
+}
+
+const styles = createThemedStyles({
+  confirmacionRecepcion: { backgroundColor: '#FFF3D8', borderColor: '#E5BE7A', borderWidth: 1, padding: 12, borderRadius: 9, marginTop: 10 },
+  confirmacionTitulo: { color: '#65420F', fontWeight: 'bold', marginBottom: 5 },
+  resultadoRecepcion: { color: '#65420F', backgroundColor: '#FFF3D8', padding: 10, borderRadius: 8, marginVertical: 8, fontSize: 12 },
   stockActualPanel: { backgroundColor: '#F7EBD5', borderRadius: 10, padding: 11, marginBottom: 10 },
   stockActualNumero: { color: '#35230E', fontSize: 22, fontWeight: 'bold', marginTop: 3 },
   fondo: { flex: 1, backgroundColor: '#FFF8E1' },

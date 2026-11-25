@@ -1,7 +1,10 @@
+import { ThemedText as Text } from '../context/ThemeContext';
 // Muestra el avance real de los pedidos guardados en MySQL.
+import { createThemedStyles } from '../context/ThemeContext';
 // Los pedidos locales antiguos conservan el seguimiento simulado para no perder compatibilidad.
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
+import ScrollView from '../components/GlobalRefreshScrollView';
 import { useFocusEffect } from '@react-navigation/native';
 import { usePedido } from '../context/PedidoContext';
 import { useAuth } from '../context/AuthContext';
@@ -30,16 +33,20 @@ export default function SeguimientoPedido({ navigation, route }) {
     ? pedidos.find((p) => String(p.id) === String(idPedidoActual))
     : pedidoActual;
   const [ahora, setAhora] = useState(Date.now());
+  const [actualizando, setActualizando] = useState(false);
+  const actualizarRef = useRef(null);
 
   useEffect(() => { ultimoEstadoRef.current = null; }, [pedidoId]);
 
-  // Actualiza el estado desde MySQL al abrir el seguimiento y cada 20 segundos.
+  // Consulta MySQL al entrar, cada 5 segundos y también cuando el usuario desliza hacia abajo.
+  // Así el avance que marca administración aparece rápidamente sin tener que salir de la pantalla.
   useFocusEffect(React.useCallback(() => {
     let vigente = true;
     let consultando = false;
-    const cargarEstado = async () => {
+    const cargarEstado = async (manual = false) => {
       if (!usuario?.id || consultando) return;
       consultando = true;
+      if (manual) setActualizando(true);
       try {
         const remotos = await api(`/usuarios/${usuario.id}/pedidos`);
         if (!vigente) return;
@@ -57,12 +64,15 @@ export default function SeguimientoPedido({ navigation, route }) {
         console.warn('No se pudo actualizar el seguimiento:', error.message);
       } finally {
         consultando = false;
+        if (manual && vigente) setActualizando(false);
       }
     };
+    actualizarRef.current = () => cargarEstado(true);
     cargarEstado();
-    const intervalo = setInterval(cargarEstado, 20000);
+    const intervalo = setInterval(cargarEstado, 5000);
     return () => {
       vigente = false;
+      actualizarRef.current = null;
       clearInterval(intervalo);
     };
   }, [usuario?.id, idPedidoActual]));
@@ -116,7 +126,7 @@ export default function SeguimientoPedido({ navigation, route }) {
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 128 }} refreshControl={<RefreshControl refreshing={actualizando} onRefresh={() => actualizarRef.current?.()} colors={["#A86616"]} tintColor="#A86616" />} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <View style={[styles.estado, colorEstado]}>
         <Text style={styles.estadoIcono}>{pasoActual.icono}</Text>
         <Text style={styles.estadoTitulo}>{pasoActual.titulo}</Text>
@@ -198,10 +208,10 @@ export default function SeguimientoPedido({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   container: { flex: 1, backgroundColor: '#FFF8E1' },
   vacio: { flex: 1, backgroundColor: '#FFF8E1', justifyContent: 'center', alignItems: 'center', padding: 24 },
-  vacioTexto: { color: '#555', marginBottom: 16 },
+  vacioTexto: { color: '#555', marginBottom: 16, fontSize: 15, lineHeight: 22 },
 
   estado: { margin: 10, padding: 20, borderRadius: 12, alignItems: 'center' },
   estadoNormal: { backgroundColor: '#e3f2fd' },
@@ -209,40 +219,40 @@ const styles = StyleSheet.create({
   estadoTerminado: { backgroundColor: '#c8e6c9' },
   estadoCancelado: { backgroundColor: '#f8d7da' },
   estadoIcono: { fontSize: 44 },
-  estadoTitulo: { fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginTop: 6 },
-  estadoDetalle: { color: '#555', textAlign: 'center', marginTop: 4 },
-  estadoPedido: { color: '#777', marginTop: 10, fontSize: 12 },
+  estadoTitulo: { fontSize: 23, fontWeight: 'bold', textAlign: 'center', marginTop: 6 },
+  estadoDetalle: { color: '#555', textAlign: 'center', marginTop: 5, fontSize: 15, lineHeight: 22 },
+  estadoPedido: { color: '#777', marginTop: 10, fontSize: 14 },
 
   caja: { backgroundColor: '#fff', marginHorizontal: 10, marginBottom: 10, padding: 12, borderRadius: 10 },
-  titulo: { fontWeight: 'bold', fontSize: 16, marginBottom: 8 },
-  nota: { color: '#888', fontSize: 12, marginTop: 4 },
+  titulo: { fontWeight: 'bold', fontSize: 18, marginBottom: 8 },
+  nota: { color: '#888', fontSize: 14, marginTop: 4 },
 
   filaPaso: { flexDirection: 'row' },
   columnaIndicador: { alignItems: 'center', width: 28 },
   circulo: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: '#ccc', justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
   circuloActivo: { borderColor: '#c77b00', backgroundColor: '#c77b00' },
   circuloActual: { backgroundColor: '#fff', borderWidth: 6 },
-  checkPaso: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+  checkPaso: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
   linea: { width: 2, flex: 1, minHeight: 22, backgroundColor: '#ddd' },
   lineaActiva: { backgroundColor: '#c77b00' },
   textoPaso: { flex: 1, marginLeft: 10, paddingBottom: 14 },
-  tituloPaso: { fontSize: 15 },
+  tituloPaso: { fontSize: 17 },
   tituloPendiente: { color: '#aaa' },
   tituloActual: { fontWeight: 'bold' },
-  detallePaso: { color: '#666', marginTop: 2 },
+  detallePaso: { color: '#666', marginTop: 3, fontSize: 14, lineHeight: 20 },
 
   filaMonto: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-  nombreItem: { flex: 1, marginRight: 10 },
+  nombreItem: { flex: 1, marginRight: 10, fontSize: 14 },
   filaTotal: { borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 8, marginTop: 4 },
-  totalTexto: { fontWeight: 'bold', fontSize: 16 },
+  totalTexto: { fontWeight: 'bold', fontSize: 18 },
 
   codigo: { fontSize: 20, fontWeight: 'bold', letterSpacing: 2 },
 
-  avisos: { marginHorizontal: 14, marginTop: 4, color: '#555' },
-  simulacion: { marginHorizontal: 14, marginTop: 6, color: '#999', fontSize: 12 },
+  avisos: { marginHorizontal: 14, marginTop: 4, color: '#555', fontSize: 14, lineHeight: 21 },
+  simulacion: { marginHorizontal: 14, marginTop: 6, color: '#999', fontSize: 14, lineHeight: 20 },
 
   botonPrincipal: { backgroundColor: '#007bff', margin: 10, marginTop: 16, padding: 14, borderRadius: 8, alignItems: 'center' },
-  botonPrincipalTexto: { color: '#fff', fontWeight: 'bold' },
+  botonPrincipalTexto: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
   botonSecundario: { borderWidth: 1, borderColor: '#c77b00', margin: 10, marginTop: 16, padding: 14, borderRadius: 8, alignItems: 'center' },
-  botonSecundarioTexto: { color: '#c77b00', fontWeight: 'bold' },
+  botonSecundarioTexto: { color: '#c77b00', fontWeight: 'bold', fontSize: 15 },
 });

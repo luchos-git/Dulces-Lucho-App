@@ -1,14 +1,8 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text, ThemedTextInput as TextInput } from '../context/ThemeContext';
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useEffect, useState } from 'react';
-import {
-  Alert,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Alert, Image, StyleSheet, TouchableOpacity, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../context/AuthContext';
 import { api, subirImagenProducto } from '../services/api';
@@ -182,7 +176,7 @@ export default function BannersAdminScreen() {
   }
 
   return (
-    <ScrollView style={styles.contenedor} contentContainerStyle={styles.contenido} keyboardShouldPersistTaps="handled">
+    <ScrollView style={styles.contenedor} contentContainerStyle={[styles.contenido, { paddingBottom: 128 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <Text style={styles.titulo}>Banners del inicio</Text>
       <Text style={styles.ayuda}>Cada banner es una imagen distinta. El inicio las muestra automáticamente como una calesita.</Text>
 
@@ -245,7 +239,7 @@ export default function BannersAdminScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   contenedor: { flex: 1, backgroundColor: '#FFF8E1' },
   contenido: { padding: 18, paddingBottom: 32 },
   titulo: { fontSize: 22, fontWeight: 'bold', color: '#38240D', marginBottom: 6 },

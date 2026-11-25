@@ -1,5 +1,7 @@
+import { ThemedText as Text } from '../context/ThemeContext';
+import { createThemedStyles } from '../context/ThemeContext';
 import React from 'react';
-import { ScrollView, View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import { ScrollView, View, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import SliderImagenes from './SliderImagenes';
 
 function imagenesDe(producto) {
@@ -18,7 +20,7 @@ export default function CarruselProductos({ titulo, productos = [], onPress, onA
   return (
     <View style={styles.seccion}>
       {!!titulo && <Text style={styles.titulo}>{titulo}</Text>}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.lista} decelerationRate="fast" snapToInterval={178} snapToAlignment="start">
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.lista} decelerationRate="normal" snapToInterval={194} snapToAlignment="start" disableIntervalMomentum scrollEventThrottle={16}>
         {productos.map((producto) => {
           const agotado = Number(producto.stockDisponible ?? producto.stock_disponible ?? 0) <= 0;
           const imagenes = imagenesDe(producto);
@@ -26,7 +28,7 @@ export default function CarruselProductos({ titulo, productos = [], onPress, onA
             <View key={producto.id} style={styles.tarjeta}>
               <TouchableOpacity activeOpacity={0.88} onPress={() => onPress?.(producto)}>
                 <View style={styles.marcoFoto}>
-                  {imagenes.length ? <SliderImagenes imagenes={imagenes} style={styles.foto} /> : <View style={styles.fotoVacia}><Text style={styles.emoji}>🍬</Text></View>}
+                  {imagenes.length ? <SliderImagenes imagenes={imagenes} style={styles.foto} resizeMode="contain" /> : <View style={styles.fotoVacia}><Text style={styles.emoji}>🍬</Text></View>}
                   {agotado && <View pointerEvents="none" style={styles.capaAgotado}><Text style={styles.textoAgotado}>AGOTADO</Text></View>}
                 </View>
                 <Text style={styles.nombre} numberOfLines={2}>{producto.nombre}</Text>
@@ -47,22 +49,22 @@ export default function CarruselProductos({ titulo, productos = [], onPress, onA
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   seccion: { marginTop: 12, marginBottom: 4 },
   titulo: { fontSize: 18, fontWeight: 'bold', color: '#493116', marginHorizontal: 10, marginBottom: 8 },
   lista: { paddingHorizontal: 10, paddingBottom: 8 },
-  tarjeta: { width: 168, marginRight: 10, backgroundColor: '#fff', borderRadius: 12, padding: 9 },
-  marcoFoto: { height: 116, borderRadius: 8, overflow: 'hidden', backgroundColor: '#FFE8C5', marginBottom: 7 },
+  tarjeta: { width: 184, height: 290, marginRight: 10, backgroundColor: '#fff', borderRadius: 12, padding: 10, justifyContent: 'space-between' },
+  marcoFoto: { height: 138, borderRadius: 8, overflow: 'hidden', backgroundColor: '#FFE8C5', marginBottom: 7 },
   foto: { width: '100%', height: '100%' },
   fotoVacia: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emoji: { fontSize: 38 },
   capaAgotado: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(45, 33, 24, 0.58)', justifyContent: 'center', alignItems: 'center' },
   textoAgotado: { color: '#fff', fontWeight: '900', fontSize: 19, letterSpacing: 1 },
-  nombre: { color: '#38240D', fontWeight: '600', minHeight: 38 },
-  precio: { color: '#A86616', fontWeight: 'bold', marginTop: 3 },
-  stock: { color: '#777', fontSize: 11, marginTop: 2 },
-  pie: { color: '#8A6B45', fontSize: 11, marginTop: 6 },
+  nombre: { color: '#38240D', fontWeight: '600', minHeight: 40, lineHeight: 19 },
+  precio: { color: '#A86616', fontWeight: 'bold', marginTop: 3, minHeight: 22 },
+  stock: { color: '#777', fontSize: 11, marginTop: 2, minHeight: 16 },
+  pie: { color: '#8A6B45', fontSize: 11, marginTop: 6, minHeight: 16 },
   pieAgotado: { color: '#B42318', fontWeight: 'bold' },
-  boton: { backgroundColor: '#ffcc80', borderRadius: 7, paddingVertical: 8, alignItems: 'center', marginTop: 7 },
+  boton: { backgroundColor: '#ffcc80', borderRadius: 7, paddingVertical: 8, minHeight: 34, alignItems: 'center', justifyContent: 'center', marginTop: 7 },
   botonTexto: { color: '#493116', fontWeight: 'bold' },
 });

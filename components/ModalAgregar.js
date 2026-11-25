@@ -1,6 +1,8 @@
+import { ThemedText as Text } from '../context/ThemeContext';
 // explicación del archivo: muestra una ventana pequeña para elegir cuántas unidades de un producto recomendado agregar al carrito
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useState, useEffect } from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Modal, View, TouchableOpacity, StyleSheet } from 'react-native';
 import SliderImagenes from './SliderImagenes';
 
 // Ventana para elegir la cantidad antes de sumar un producto al carrito.
@@ -57,7 +59,7 @@ export default function ModalAgregar({ producto, onCancelar, onConfirmar, maxCan
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   fondo: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
   caja: { backgroundColor: '#fff', borderRadius: 12, padding: 16 },
   foto: { height: 110, backgroundColor: '#eee', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginBottom: 10, overflow: 'hidden' },

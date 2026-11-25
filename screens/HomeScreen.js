@@ -1,6 +1,9 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text, ThemedTextInput as TextInput } from '../context/ThemeContext';
 // explicación del archivo: muestra el catálogo de productos y permite filtrarlo por categoría y rango de precios
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from 'react-native';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useProductos } from '../context/ProductosContext';
 import { api } from '../services/api';
 import SliderImagenes from '../components/SliderImagenes';
@@ -86,7 +89,7 @@ export default function HomeScreen({ navigation }) {
 
   // muestra los filtros y los productos agrupados por categoría
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contenidoScroll}>
+    <ScrollView style={styles.container} contentContainerStyle={[styles.contenidoScroll, { paddingBottom: 128 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <SliderBanners banners={banners} />
 
       <CarruselProductos
@@ -150,7 +153,7 @@ export default function HomeScreen({ navigation }) {
               <View key={prod.id} style={styles.cardGrid}>
                 <TouchableOpacity style={styles.contenidoProducto} activeOpacity={0.85} onPress={() => irADetalle(prod)}>
                   <View style={styles.marcoImagen}>
-                    {obtenerImagenesProducto(prod).length ? <SliderImagenes imagenes={obtenerImagenesProducto(prod)} style={styles.fotoPlaceholder} /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
+                    {obtenerImagenesProducto(prod).length ? <SliderImagenes imagenes={obtenerImagenesProducto(prod)} style={styles.fotoPlaceholder} resizeMode="contain" /> : <View style={styles.fotoPlaceholder}><Text style={styles.emojiFoto}>{iconoCategoria(prod.categoria)}</Text></View>}
                     {Number(prod.stockDisponible ?? prod.stock_disponible ?? 0) <= 0 && <View pointerEvents="none" style={styles.capaAgotado}><Text style={styles.textoAgotado}>AGOTADO</Text></View>}
                   </View>
                   <Text style={styles.nombreProd} numberOfLines={2}>{prod.nombre}</Text>
@@ -168,13 +171,13 @@ export default function HomeScreen({ navigation }) {
 }
 
 // estilos del catálogo, filtros y tarjetas de productos
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   container: { flex: 1, backgroundColor: '#FFF8E1' },
   contenidoScroll: { paddingBottom: 120 },
   tituloSeccion: { fontSize: 18, fontWeight: 'bold', marginLeft: 10, marginTop: 14, marginBottom: 4 },
   fila: { flexDirection: 'row', justifyContent: 'space-around', marginVertical: 10 },
   card: { width: 150, backgroundColor: '#fff', padding: 10, alignItems: 'center', borderRadius: 10 },
-  contenidoProducto: { width: '100%', alignItems: 'center' },
+  contenidoProducto: { width: '100%', alignItems: 'center', flexGrow: 1 },
 
   filaCategorias: { paddingLeft: 10, marginBottom: 10 },
   chip: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ffcc80', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8 },
@@ -191,13 +194,13 @@ const styles = StyleSheet.create({
   sinResultados: { textAlign: 'center', color: '#888', marginTop: 20 },
 
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingHorizontal: 10, paddingBottom: 10 },
-  cardGrid: { width: '48%', backgroundColor: '#fff', padding: 10, alignItems: 'center', borderRadius: 10, marginBottom: 12 },
-  marcoImagen: { width: '100%', height: 100, borderRadius: 6, overflow: 'hidden', marginBottom: 6, position: 'relative' },
-  fotoPlaceholder: { width: '100%', height: '100%', backgroundColor: '#FFE8C5', justifyContent: 'center', alignItems: 'center', borderRadius: 6 },
+  cardGrid: { width: '48.5%', height: 258, backgroundColor: '#fff', padding: 11, alignItems: 'center', justifyContent: 'space-between', borderRadius: 12, marginBottom: 13 },
+  marcoImagen: { width: '100%', height: 148, borderRadius: 8, overflow: 'hidden', marginBottom: 7, position: 'relative' },
+  fotoPlaceholder: { width: '100%', height: '100%', backgroundColor: '#FFE8C5', justifyContent: 'center', alignItems: 'center', borderRadius: 8 },
   capaAgotado: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(45,33,24,0.58)', alignItems: 'center', justifyContent: 'center' },
   textoAgotado: { color: '#fff', fontWeight: '900', fontSize: 17, letterSpacing: 1 },
   emojiFoto: { fontSize: 42 },
-  nombreProd: { textAlign: 'center', marginBottom: 2 },
-  precioNoInteractivo: { alignSelf: 'center', minHeight: 24, justifyContent: 'center' },
+  nombreProd: { textAlign: 'center', marginBottom: 2, minHeight: 40, lineHeight: 19 },
+  precioNoInteractivo: { alignSelf: 'center', minHeight: 28, justifyContent: 'center' },
   precio: { fontWeight: 'bold', color: '#c77b00', marginTop: 2 },
 });

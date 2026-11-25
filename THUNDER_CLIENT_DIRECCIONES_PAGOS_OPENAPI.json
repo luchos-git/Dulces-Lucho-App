@@ -1,0 +1,106 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Dulces Lucho - Direcciones y medios de pago",
+    "version": "1.0.0",
+    "description": "Gestión de direcciones múltiples, tarjetas tokenizadas solo como referencia (marca y últimos cuatro), billeteras virtuales, preferencias y compras. No se guardan números completos ni CVV y no se procesan cobros reales sin pasarela." 
+  },
+  "servers": [{"url": "http://localhost:3000/api", "description": "Backend local"}],
+  "components": {
+    "securitySchemes": {"BearerAuth": {"type": "http", "scheme": "bearer"}},
+    "schemas": {
+      "Direccion": {
+        "type": "object",
+        "required": ["alias", "direccion", "localidad"],
+        "properties": {
+          "alias": {"type": "string", "example": "Casa"},
+          "destinatario": {"type": "string", "example": "Luciano"},
+          "direccion": {"type": "string", "example": "Av. Mitre 200"},
+          "localidad": {"type": "string", "example": "Lanús"},
+          "detalle": {"type": "string", "example": "Tocar timbre 2B; dejar en portería"},
+          "esPredeterminada": {"type": "boolean", "example": true}
+        }
+      },
+      "MedioPago": {
+        "type": "object",
+        "required": ["tipo"],
+        "properties": {
+          "tipo": {"type": "string", "enum": ["credito", "debito", "mercado_pago", "cuenta_dni", "modo", "naranja_x", "uala", "transferencia", "rapipago"]},
+          "alias": {"type": "string", "example": "Mi Visa personal"},
+          "marca": {"type": "string", "example": "Visa"},
+          "ultimos4": {"type": "string", "example": "4242"},
+          "titular": {"type": "string", "example": "NOMBRE APELLIDO"},
+          "vencimientoMes": {"type": "integer", "example": 12},
+          "vencimientoAnio": {"type": "integer", "example": 2030},
+          "esPredeterminado": {"type": "boolean", "example": true}
+        },
+        "description": "Nunca enviar ni persistir el número completo de tarjeta, CVV, contraseñas o códigos de billeteras."
+      }
+    }
+  },
+  "paths": {
+    "/configuracion-tienda": {
+      "get": {"summary": "Consultar métodos de pago y condiciones habilitadas por la tienda", "responses": {"200": {"description": "Configuración pública con metodosPago y envioHabilitado"}}}
+    },
+    "/admin/configuracion-tienda": {
+      "put": {
+        "security": [{"BearerAuth": []}],
+        "summary": "Guardar datos de la tienda y activar/desactivar medios de pago",
+        "requestBody": {"required": true, "content": {"application/json": {"example": {"adminId": 9, "nombre": "Dulces Lucho", "envioHabilitado": true, "costoEnvioBase": 500, "metodosPago": {"credito": true, "debito": true, "rapipago": true, "mercado_pago": true, "cuenta_dni": true, "modo": true, "naranja_x": true, "uala": true, "transferencia": true}}}}},
+        "responses": {"200": {"description": "Configuración guardada"}, "403": {"description": "Sin permisos"}}
+      }
+    },
+    "/usuarios/{id}/direcciones": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "example": 9}}],
+      "get": {"security": [{"BearerAuth": []}], "summary": "Listar direcciones guardadas de la cuenta", "responses": {"200": {"description": "Direcciones con alias, destinatario y detalle"}}},
+      "post": {
+        "security": [{"BearerAuth": []}], "summary": "Guardar una dirección adicional",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Direccion"}, "example": {"alias": "Casa de mamá", "destinatario": "Marta", "direccion": "Calle 123 456", "localidad": "Lanús", "detalle": "Tocar timbre; entregar a Marta", "esPredeterminada": false}}}},
+        "responses": {"201": {"description": "Dirección guardada"}, "401": {"description": "Sesión inválida"}}
+      }
+    },
+    "/usuarios/{id}/direcciones/{direccionId}": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}},
+        {"name": "direccionId", "in": "path", "required": true, "schema": {"type": "integer"}}
+      ],
+      "put": {"security": [{"BearerAuth": []}], "summary": "Editar una dirección o marcarla como principal", "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Direccion"}}}}, "responses": {"200": {"description": "Dirección actualizada"}}},
+      "delete": {"security": [{"BearerAuth": []}], "summary": "Quitar una dirección de la cuenta (baja lógica)", "responses": {"200": {"description": "Dirección desactivada"}}}
+    },
+    "/usuarios/{id}/metodos-pago": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "example": 9}}],
+      "get": {"security": [{"BearerAuth": []}], "summary": "Listar tarjetas y medios guardados", "responses": {"200": {"description": "Lista de referencias de pago guardadas"}}},
+      "post": {
+        "security": [{"BearerAuth": []}], "summary": "Guardar tarjeta como referencia o una billetera virtual",
+        "description": "Para tarjetas enviar únicamente marca, ultimos4, titular y vencimiento. Nunca enviar PAN completo ni CVV.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MedioPago"}, "examples": {"tarjeta": {"value": {"tipo": "credito", "alias": "Visa personal", "marca": "Visa", "ultimos4": "4242", "titular": "NOMBRE APELLIDO", "vencimientoMes": 12, "vencimientoAnio": 2030, "esPredeterminado": true}}, "billetera": {"value": {"tipo": "mercado_pago", "alias": "Mi cuenta de Mercado Pago", "esPredeterminado": false}}}}}},
+        "responses": {"201": {"description": "Medio guardado"}, "400": {"description": "Medio deshabilitado o datos inválidos"}}
+      }
+    },
+    "/usuarios/{id}/metodos-pago/{metodoId}/preferido": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}},
+        {"name": "metodoId", "in": "path", "required": true, "schema": {"type": "integer"}}
+      ],
+      "put": {"security": [{"BearerAuth": []}], "summary": "Marcar un medio de pago guardado como predeterminado", "responses": {"200": {"description": "Preferencia actualizada"}}}
+    },
+    "/usuarios/{id}/metodos-pago/{metodoId}": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}},
+        {"name": "metodoId", "in": "path", "required": true, "schema": {"type": "integer"}}
+      ],
+      "delete": {"security": [{"BearerAuth": []}], "summary": "Quitar un medio de pago guardado", "responses": {"200": {"description": "Medio desactivado"}}}
+    },
+    "/usuarios/{id}/pedidos": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}}],
+      "get": {"security": [{"BearerAuth": []}], "summary": "Consultar pedidos de una cuenta, incluida información de entrega y pago", "responses": {"200": {"description": "Pedidos propios"}}}
+    },
+    "/ventas": {
+      "post": {
+        "security": [{"BearerAuth": []}], "summary": "Registrar compra, dirección elegida y medio de pago",
+        "requestBody": {"required": true, "content": {"application/json": {"example": {"usuarioId": 9, "items": [{"id": 1, "cantidad": 2}], "metodoPago": "credito", "metodoPagoUsuarioId": 3, "conEnvio": true, "direccion": "Av. Mitre 200", "localidad": "Lanús", "direccionAlias": "Casa", "direccionDestinatario": "Luciano", "instruccionesEntrega": "Tocar timbre 2B", "distanciaKm": 2.4, "costoEnvio": 500}}}},
+        "responses": {"201": {"description": "Compra registrada"}, "400": {"description": "Datos inválidos"}, "409": {"description": "Stock insuficiente"}}
+      }
+    }
+  }
+}

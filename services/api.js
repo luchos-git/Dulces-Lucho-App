@@ -41,7 +41,12 @@ export async function api(ruta, opciones = {}) {
   }
 
   if (!respuesta.ok) {
-    const error = new Error(datos?.error || `El servidor respondió con el código ${respuesta.status}.`);
+    const cuerpo = String(datos?.error || '');
+    const pareceRutaInexistente = respuesta.status === 404 && /^Cannot (GET|POST|PUT|DELETE)\s\/api\//i.test(cuerpo);
+    const mensaje = pareceRutaInexistente
+      ? `El servidor de ${base} no reconoce ${ruta}. El proyecto incluye esta ruta; reiniciá el backend desde Dulces-Lucho-App/backend con npm start y comprobá que no haya otra API ocupando el puerto 3000.`
+      : (datos?.error || `El servidor respondió con el código ${respuesta.status}.`);
+    const error = new Error(mensaje);
     error.status = respuesta.status;
     error.detalle = datos?.detalle || datos?.codigo || '';
     throw error;

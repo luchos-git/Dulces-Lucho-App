@@ -1,7 +1,10 @@
+import { ThemedText as Text, ThemedTextInput as TextInput } from '../context/ThemeContext';
 // explicación del archivo: muestra las opciones de retiro o envío y reúne los datos necesarios para calcular el costo de entrega
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
+import { createThemedStyles } from '../context/ThemeContext';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { calcularEnvio, UMBRAL_GRATIS_KM } from '../services/envio';
+import { api } from '../services/api';
 
 // Guarda todo el estado de la entrega (retiro o envío) y el cálculo del costo.
 // "inicial" sirve para arrancar con lo que ya se eligió en otra pantalla.
@@ -12,8 +15,29 @@ export function useEntrega(inicial = {}, tarifaBase = 0) {
   const [envio, setEnvio] = useState(inicial.envio || null);
   const [calculando, setCalculando] = useState(false);
   const [errorEnvio, setErrorEnvio] = useState('');
+  const [datosTienda, setDatosTienda] = useState(null);
+  const [cargandoTienda, setCargandoTienda] = useState(false);
 
-  const calcular = async () => {
+  const cargarConfiguracionTienda = useCallback(async () => {
+    setCargandoTienda(true);
+    try {
+      const datos = await api('/configuracion-tienda');
+      setDatosTienda(datos || null);
+      return datos || null;
+    } catch (error) {
+      setDatosTienda(null);
+      console.warn('No se pudo cargar la dirección del local:', error?.message || error);
+      return null;
+    } finally {
+      setCargandoTienda(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    cargarConfiguracionTienda();
+  }, [cargarConfiguracionTienda]);
+
+  const calcular = useCallback(async () => {
     if (!direccion.trim()) {
       setErrorEnvio('Escribí la calle y el número.');
       return;
@@ -26,24 +50,25 @@ export function useEntrega(inicial = {}, tarifaBase = 0) {
     setErrorEnvio('');
     setEnvio(null);
     try {
+      // El backend consulta el local guardado en MySQL, coordina las APIs y devuelve el precio final.
       const resultado = await calcularEnvio(direccion.trim(), localidad.trim());
-      setEnvio({ ...resultado, costo: Number(resultado.costo || 0) + Math.max(0, Number(tarifaBase || 0)) });
+      setEnvio(resultado);
     } catch (e) {
       setErrorEnvio(e.message || 'No pudimos calcular el envío. Probá de nuevo.');
     } finally {
       setCalculando(false);
     }
-  };
+  }, [direccion, localidad]);
 
-  // Si el cliente cambia la dirección, el cálculo anterior ya no vale
-  const cambiarDireccion = (texto) => {
+  // Si el cliente cambia la dirección, el cálculo anterior ya no vale.
+  const cambiarDireccion = useCallback((texto) => {
     setDireccion(texto);
     setEnvio(null);
-  };
-  const cambiarLocalidad = (texto) => {
+  }, []);
+  const cambiarLocalidad = useCallback((texto) => {
     setLocalidad(texto);
     setEnvio(null);
-  };
+  }, []);
 
   return {
     conEnvio,
@@ -53,13 +78,15 @@ export function useEntrega(inicial = {}, tarifaBase = 0) {
     envio,
     calculando,
     errorEnvio,
+    datosTienda,
+    cargandoTienda,
     calcular,
     cambiarDireccion,
     cambiarLocalidad,
   };
 }
 
-export default function EntregaEnvio({ entrega, envioHabilitado = true, tarifaBase = 0 }) {
+export default function EntregaEnvio({ entrega, envioHabilitado = true, tarifaBase = 0, mostrarDireccionLocal = false, onDireccionEditada }) {
   const {
     conEnvio,
     setConEnvio,
@@ -68,6 +95,8 @@ export default function EntregaEnvio({ entrega, envioHabilitado = true, tarifaBa
     envio,
     calculando,
     errorEnvio,
+    datosTienda,
+    cargandoTienda,
     calcular,
     cambiarDireccion,
     cambiarLocalidad,
@@ -76,6 +105,15 @@ export default function EntregaEnvio({ entrega, envioHabilitado = true, tarifaBa
   return (
     <View>
       <Text style={styles.titulo}>Entrega</Text>
+
+      {mostrarDireccionLocal && (
+        <View style={styles.direccionLocal}>
+          <Text style={styles.puntoTitulo}>📍 Dirección del local</Text>
+          <Text style={styles.puntoTexto}>
+            {cargandoTienda ? 'Consultando dirección...' : [datosTienda?.direccion, datosTienda?.localidad].filter(Boolean).join(', ') || 'El administrador todavía no configuró la dirección del local.'}
+          </Text>
+        </View>
+      )}
 
       <View style={styles.filaOpciones}>
         <TouchableOpacity
@@ -100,13 +138,13 @@ export default function EntregaEnvio({ entrega, envioHabilitado = true, tarifaBa
             style={styles.input}
             placeholder="Calle y número (ej: Av. Mitre 200)"
             value={direccion}
-            onChangeText={cambiarDireccion}
+            onChangeText={(texto) => { onDireccionEditada?.(); cambiarDireccion(texto); }}
           />
           <TextInput
             style={styles.input}
             placeholder="Localidad (ej: Lanús)"
             value={localidad}
-            onChangeText={cambiarLocalidad}
+            onChangeText={(texto) => { onDireccionEditada?.(); cambiarLocalidad(texto); }}
           />
 
           <TouchableOpacity style={styles.botonCalcular} onPress={calcular} disabled={calculando}>
@@ -146,8 +184,9 @@ export default function EntregaEnvio({ entrega, envioHabilitado = true, tarifaBa
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   titulo: { fontWeight: 'bold', fontSize: 16, marginBottom: 8 },
+  direccionLocal: { backgroundColor: '#FFF3E0', borderRadius: 8, padding: 10, marginBottom: 10 },
   filaOpciones: { flexDirection: 'row' },
   opcion: { flex: 1, borderWidth: 1, borderColor: '#ffcc80', paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginRight: 8 },
   opcionActiva: { backgroundColor: '#ffcc80' },

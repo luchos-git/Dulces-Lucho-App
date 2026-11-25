@@ -1,6 +1,9 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text } from '../context/ThemeContext';
 // Ayuda y soporte: guía de compra y contacto de la tienda configurado por administración.
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { api } from '../services/api';
 
 export default function AyudaScreen() {
@@ -27,7 +30,7 @@ export default function AyudaScreen() {
   };
 
   return (
-    <ScrollView style={styles.contenedor} contentContainerStyle={styles.contenido}>
+    <ScrollView style={styles.contenedor} contentContainerStyle={[styles.contenido, { paddingBottom: 128 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <View style={styles.encabezado}>
         <Text style={styles.titulo}>Ayuda y soporte</Text>
         <Text style={styles.descripcion}>Información para realizar y consultar tus compras.</Text>
@@ -62,7 +65,7 @@ function Paso({ numero, texto }) {
   return <View style={styles.paso}><View style={styles.numero}><Text style={styles.numeroTexto}>{numero}</Text></View><Text style={styles.texto}>{texto}</Text></View>;
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   contenedor: { flex: 1, backgroundColor: '#FFF8E1' }, contenido: { padding: 16, paddingBottom: 30 },
   encabezado: { backgroundColor: '#FFE0B2', borderRadius: 12, padding: 17, marginBottom: 12 },
   titulo: { fontSize: 23, fontWeight: 'bold', color: '#38240D' }, descripcion: { color: '#765F43', marginTop: 5, lineHeight: 18 },

@@ -1,6 +1,9 @@
+import ScrollView from '../components/GlobalRefreshScrollView';
+import { ThemedText as Text, ThemedTextInput as TextInput } from '../context/ThemeContext';
 // explicación del archivo: contiene pantallas administrativas de una versión anterior que se mantienen como referencia
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useState } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { useProductos } from '../context/ProductosContext';
 
 export default function AdminScreen() {
@@ -29,7 +32,7 @@ export default function AdminScreen() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView style={styles.container}>
+      <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 128 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
         <Text style={styles.titulo}>Agregar producto</Text>
 
         <Text style={styles.label}>Nombre</Text>
@@ -49,7 +52,7 @@ export default function AdminScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   container: { flex: 1, backgroundColor: '#FFF8E1', padding: 20 },
   titulo: { fontSize: 22, fontWeight: 'bold', marginBottom: 20 },
   label: { fontSize: 14, color: '#555', marginBottom: 4, marginTop: 12 },

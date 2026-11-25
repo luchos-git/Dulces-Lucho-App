@@ -1,5 +1,7 @@
+import { ThemedText as Text, ThemedTextInput as TextInput } from '../context/ThemeContext';
+import { createThemedStyles } from '../context/ThemeContext';
 import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
 
 // Campo reutilizable que permite alternar entre contraseña oculta y visible.
 export default function CampoPassword({ style, contenedorStyle, ...props }) {
@@ -14,7 +16,7 @@ export default function CampoPassword({ style, contenedorStyle, ...props }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createThemedStyles({
   fila: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#E8D8C2', borderRadius: 8, marginBottom: 10, paddingRight: 10 },
   input: { flex: 1, minWidth: 0, width: undefined, backgroundColor: 'transparent', borderWidth: 0, borderRadius: 0, marginBottom: 0, padding: 12, color: '#35230E' },
   boton: { paddingHorizontal: 5, paddingVertical: 8 },

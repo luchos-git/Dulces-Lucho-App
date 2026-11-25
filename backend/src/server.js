@@ -5,6 +5,7 @@ import cors from 'cors';
 import express from 'express';
 import multer from 'multer';
 import mysql from 'mysql2/promise';
+import { calcularEnvioDesdeBackend } from './services/envios.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -236,7 +237,7 @@ async function exigirSesionUsuario(req, res, usuarioId) {
   return true;
 }
 
-const METODOS_PAGO_VALIDOS = ['credito', 'debito', 'rapipago'];
+const METODOS_PAGO_VALIDOS = ['credito', 'debito', 'rapipago', 'mercado_pago', 'cuenta_dni', 'modo', 'naranja_x', 'uala', 'transferencia'];
 const ESTADOS_PEDIDO_VALIDOS = ['confirmado', 'preparando', 'en_camino', 'listo_para_retirar', 'entregado', 'cancelado'];
 
 function normalizarConfiguracionTienda(fila = {}) {
@@ -255,6 +256,12 @@ function normalizarConfiguracionTienda(fila = {}) {
       credito: Boolean(Number(fila.pago_credito_activo ?? 1)),
       debito: Boolean(Number(fila.pago_debito_activo ?? 1)),
       rapipago: Boolean(Number(fila.pago_rapipago_activo ?? 1)),
+      mercado_pago: Boolean(Number(fila.pago_mercado_pago_activo ?? 1)),
+      cuenta_dni: Boolean(Number(fila.pago_cuenta_dni_activo ?? 1)),
+      modo: Boolean(Number(fila.pago_modo_activo ?? 1)),
+      naranja_x: Boolean(Number(fila.pago_naranja_x_activo ?? 1)),
+      uala: Boolean(Number(fila.pago_uala_activo ?? 1)),
+      transferencia: Boolean(Number(fila.pago_transferencia_activo ?? 1)),
     },
   };
 }
@@ -770,6 +777,208 @@ app.put('/api/usuarios/:id/preferencias', async (req, res) => {
   }
 });
 
+// Direcciones guardadas del cliente: varias por cuenta, con alias y notas de entrega.
+app.get('/api/usuarios/:id/direcciones', async (req, res) => {
+  const usuarioId = Number(req.params.id);
+  if (!verificarSesionPropia(req, usuarioId)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  try {
+    const [filas] = await db.query(`SELECT id, usuario_id AS usuarioId, alias, destinatario, direccion, localidad, detalle,
+      es_predeterminada AS esPredeterminada FROM direcciones_usuario WHERE usuario_id = ? AND activo = 1
+      ORDER BY es_predeterminada DESC, id DESC`, [usuarioId]);
+    res.json(filas.map((d) => ({ ...d, esPredeterminada: Boolean(Number(d.esPredeterminada)) })));
+  } catch (error) {
+    console.error('Error al consultar direcciones:', error.message);
+    res.status(500).json({ error: 'No se pudieron consultar las direcciones. Ejecutá la migración de direcciones y pagos.', ...(process.env.NODE_ENV === 'production' ? {} : { detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.post('/api/usuarios/:id/direcciones', async (req, res) => {
+  const usuarioId = Number(req.params.id);
+  if (!verificarSesionPropia(req, usuarioId)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  const b = req.body || {};
+  const alias = String(b.alias || '').trim();
+  const destinatario = String(b.destinatario || '').trim();
+  const direccion = String(b.direccion || '').trim();
+  const localidad = String(b.localidad || '').trim();
+  const detalle = String(b.detalle || '').trim();
+  const predeterminada = Boolean(b.esPredeterminada);
+  if (!alias || !direccion || !localidad || alias.length > 50 || destinatario.length > 120 || direccion.length > 200 || localidad.length > 100 || detalle.length > 500) {
+    return res.status(400).json({ error: 'Completá nombre, dirección y localidad; revisá los largos permitidos.' });
+  }
+  const conexion = await db.getConnection();
+  try {
+    await conexion.beginTransaction();
+    const [[cuenta]] = await conexion.query('SELECT id FROM usuarios WHERE id = ? AND activo = 1', [usuarioId]);
+    if (!cuenta) { await conexion.rollback(); return res.status(404).json({ error: 'La cuenta no existe o está inactiva.' }); }
+    const [[existente]] = await conexion.query('SELECT COUNT(*) AS total FROM direcciones_usuario WHERE usuario_id = ? AND activo = 1', [usuarioId]);
+    const usarComoPrincipal = predeterminada || Number(existente.total) === 0;
+    if (usarComoPrincipal) await conexion.query('UPDATE direcciones_usuario SET es_predeterminada = 0 WHERE usuario_id = ? AND activo = 1', [usuarioId]);
+    const [r] = await conexion.query(`INSERT INTO direcciones_usuario
+      (usuario_id, alias, destinatario, direccion, localidad, detalle, es_predeterminada)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`, [usuarioId, alias, destinatario || null, direccion, localidad, detalle || null, usarComoPrincipal ? 1 : 0]);
+    if (usarComoPrincipal) await conexion.query('UPDATE usuarios SET direccion_entrega = ?, localidad_entrega = ? WHERE id = ?', [direccion, localidad, usuarioId]);
+    const [[guardada]] = await conexion.query(`SELECT id, usuario_id AS usuarioId, alias, destinatario, direccion, localidad, detalle,
+      es_predeterminada AS esPredeterminada FROM direcciones_usuario WHERE id = ?`, [r.insertId]);
+    await conexion.commit();
+    res.status(201).json({ ...guardada, esPredeterminada: Boolean(Number(guardada.esPredeterminada)) });
+  } catch (error) {
+    await conexion.rollback();
+    console.error('Error al guardar dirección:', error.message);
+    res.status(500).json({ error: 'No se pudo guardar la dirección.', ...(process.env.NODE_ENV === 'production' ? {} : { detalle: error.sqlMessage || error.message }) });
+  } finally { conexion.release(); }
+});
+
+app.put('/api/usuarios/:id/direcciones/:direccionId', async (req, res) => {
+  const usuarioId = Number(req.params.id);
+  const direccionId = Number(req.params.direccionId);
+  if (!verificarSesionPropia(req, usuarioId)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  if (!Number.isInteger(direccionId) || direccionId <= 0) return res.status(400).json({ error: 'El ID de dirección no es válido.' });
+  const conexion = await db.getConnection();
+  try {
+    await conexion.beginTransaction();
+    const [[actual]] = await conexion.query('SELECT * FROM direcciones_usuario WHERE id = ? AND usuario_id = ? AND activo = 1 FOR UPDATE', [direccionId, usuarioId]);
+    if (!actual) { await conexion.rollback(); return res.status(404).json({ error: 'No se encontró la dirección de esta cuenta.' }); }
+    const b = req.body || {};
+    const datos = {
+      alias: b.alias == null ? actual.alias : String(b.alias).trim(),
+      destinatario: b.destinatario == null ? (actual.destinatario || '') : String(b.destinatario).trim(),
+      direccion: b.direccion == null ? actual.direccion : String(b.direccion).trim(),
+      localidad: b.localidad == null ? actual.localidad : String(b.localidad).trim(),
+      detalle: b.detalle == null ? (actual.detalle || '') : String(b.detalle).trim(),
+      predeterminada: Boolean(b.esPredeterminada) || Boolean(Number(actual.es_predeterminada)),
+    };
+    if (!datos.alias || !datos.direccion || !datos.localidad || datos.alias.length > 50 || datos.destinatario.length > 120 || datos.direccion.length > 200 || datos.localidad.length > 100 || datos.detalle.length > 500) {
+      await conexion.rollback(); return res.status(400).json({ error: 'Revisá el nombre, dirección, localidad y notas.' });
+    }
+    if (Boolean(b.esPredeterminada)) await conexion.query('UPDATE direcciones_usuario SET es_predeterminada = 0 WHERE usuario_id = ? AND activo = 1', [usuarioId]);
+    await conexion.query(`UPDATE direcciones_usuario SET alias = ?, destinatario = ?, direccion = ?, localidad = ?, detalle = ?,
+      es_predeterminada = ? WHERE id = ? AND usuario_id = ?`, [datos.alias, datos.destinatario || null, datos.direccion, datos.localidad, datos.detalle || null, datos.predeterminada ? 1 : 0, direccionId, usuarioId]);
+    if (datos.predeterminada) await conexion.query('UPDATE usuarios SET direccion_entrega = ?, localidad_entrega = ? WHERE id = ?', [datos.direccion, datos.localidad, usuarioId]);
+    await conexion.commit();
+    res.json({ ok: true, id: direccionId });
+  } catch (error) {
+    await conexion.rollback();
+    console.error('Error al actualizar dirección:', error.message);
+    res.status(500).json({ error: 'No se pudo actualizar la dirección.', ...(process.env.NODE_ENV === 'production' ? {} : { detalle: error.sqlMessage || error.message }) });
+  } finally { conexion.release(); }
+});
+
+app.delete('/api/usuarios/:id/direcciones/:direccionId', async (req, res) => {
+  const usuarioId = Number(req.params.id);
+  const direccionId = Number(req.params.direccionId);
+  if (!verificarSesionPropia(req, usuarioId)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  try {
+    const [r] = await db.query('UPDATE direcciones_usuario SET activo = 0, es_predeterminada = 0 WHERE id = ? AND usuario_id = ? AND activo = 1', [direccionId, usuarioId]);
+    if (!r.affectedRows) return res.status(404).json({ error: 'No se encontró la dirección.' });
+    const [[principal]] = await db.query('SELECT id, direccion, localidad FROM direcciones_usuario WHERE usuario_id = ? AND activo = 1 ORDER BY es_predeterminada DESC, id DESC LIMIT 1', [usuarioId]);
+    await db.query('UPDATE usuarios SET direccion_entrega = ?, localidad_entrega = ? WHERE id = ?', [principal?.direccion || null, principal?.localidad || null, usuarioId]);
+    if (principal) {
+      await db.query('UPDATE direcciones_usuario SET es_predeterminada = 0 WHERE usuario_id = ? AND activo = 1', [usuarioId]);
+      await db.query('UPDATE direcciones_usuario SET es_predeterminada = 1 WHERE usuario_id = ? AND id = ?', [usuarioId, principal.id]);
+    }
+    res.json({ ok: true, id: direccionId });
+  } catch (error) {
+    console.error('Error al quitar dirección:', error.message);
+    res.status(500).json({ error: 'No se pudo quitar la dirección.', ...(process.env.NODE_ENV === 'production' ? {} : { detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Medios de pago guardados: nunca recibimos ni persistimos el número completo ni el CVV.
+app.get('/api/usuarios/:id/metodos-pago', async (req, res) => {
+  const usuarioId = Number(req.params.id);
+  if (!verificarSesionPropia(req, usuarioId)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  try {
+    const [filas] = await db.query(`SELECT id, usuario_id AS usuarioId, tipo, alias, marca, ultimos4, titular,
+      vencimiento_mes AS vencimientoMes, vencimiento_anio AS vencimientoAnio, es_predeterminado AS esPredeterminado
+      FROM metodos_pago_usuario WHERE usuario_id = ? AND activo = 1 ORDER BY es_predeterminado DESC, id DESC`, [usuarioId]);
+    res.json(filas.map((m) => ({ ...m, esPredeterminado: Boolean(Number(m.esPredeterminado)) })));
+  } catch (error) {
+    console.error('Error al consultar medios de pago:', error.message);
+    res.status(500).json({ error: 'No se pudieron consultar los medios guardados. Ejecutá la migración de direcciones y pagos.', ...(process.env.NODE_ENV === 'production' ? {} : { detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.post('/api/usuarios/:id/metodos-pago', async (req, res) => {
+  const usuarioId = Number(req.params.id);
+  if (!verificarSesionPropia(req, usuarioId)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  const b = req.body || {};
+  const tipo = String(b.tipo || '').trim();
+  const alias = String(b.alias || '').trim();
+  const marca = String(b.marca || '').trim();
+  const ultimos4 = String(b.ultimos4 || '').replace(/\D/g, '').slice(-4);
+  const titular = String(b.titular || '').trim();
+  const mes = b.vencimientoMes == null ? null : Number(b.vencimientoMes);
+  const anio = b.vencimientoAnio == null ? null : Number(b.vencimientoAnio);
+  if (!METODOS_PAGO_VALIDOS.includes(tipo)) return res.status(400).json({ error: 'El tipo de medio de pago no es válido.' });
+  try {
+    const tienda = await obtenerConfiguracionTienda();
+    if (!tienda.metodosPago[tipo]) return res.status(400).json({ error: 'Ese medio de pago no está habilitado por la tienda.' });
+    const esTarjeta = tipo === 'credito' || tipo === 'debito';
+    if (esTarjeta && (!marca || ultimos4.length !== 4 || !titular || !Number.isInteger(mes) || mes < 1 || mes > 12 || !Number.isInteger(anio) || anio < new Date().getFullYear())) {
+      return res.status(400).json({ error: 'Para guardar una tarjeta necesitamos marca, últimos cuatro dígitos, titular y vencimiento válido.' });
+    }
+    if (alias.length > 80 || marca.length > 30 || titular.length > 120) return res.status(400).json({ error: 'Revisá los datos del medio de pago.' });
+    const conexion = await db.getConnection();
+    try {
+      await conexion.beginTransaction();
+      const [[cuenta]] = await conexion.query('SELECT id FROM usuarios WHERE id = ? AND activo = 1', [usuarioId]);
+      if (!cuenta) { await conexion.rollback(); return res.status(404).json({ error: 'La cuenta no existe o está inactiva.' }); }
+      const [[cuantos]] = await conexion.query('SELECT COUNT(*) AS total FROM metodos_pago_usuario WHERE usuario_id = ? AND activo = 1', [usuarioId]);
+      const preferido = Boolean(b.esPredeterminado) || Number(cuantos.total) === 0;
+      if (preferido) await conexion.query('UPDATE metodos_pago_usuario SET es_predeterminado = 0 WHERE usuario_id = ? AND activo = 1', [usuarioId]);
+      const [r] = await conexion.query(`INSERT INTO metodos_pago_usuario
+        (usuario_id, tipo, alias, marca, ultimos4, titular, vencimiento_mes, vencimiento_anio, es_predeterminado)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [usuarioId, tipo, alias || null, esTarjeta ? marca : null, esTarjeta ? ultimos4 : null,
+        esTarjeta ? titular : null, esTarjeta ? mes : null, esTarjeta ? anio : null, preferido ? 1 : 0]);
+      if (preferido) await conexion.query('UPDATE usuarios SET metodo_pago_preferido = ? WHERE id = ?', [tipo, usuarioId]);
+      await conexion.commit();
+      res.status(201).json({ ok: true, id: r.insertId, tipo, alias, marca: esTarjeta ? marca : null, ultimos4: esTarjeta ? ultimos4 : null, esPredeterminado: preferido });
+    } catch (error) { await conexion.rollback(); throw error; }
+    finally { conexion.release(); }
+  } catch (error) {
+    console.error('Error al guardar medio de pago:', error.message);
+    res.status(500).json({ error: 'No se pudo guardar el medio de pago.', ...(process.env.NODE_ENV === 'production' ? {} : { detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+app.put('/api/usuarios/:id/metodos-pago/:metodoId/preferido', async (req, res) => {
+  const usuarioId = Number(req.params.id);
+  const metodoId = Number(req.params.metodoId);
+  if (!verificarSesionPropia(req, usuarioId)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  const conexion = await db.getConnection();
+  try {
+    await conexion.beginTransaction();
+    const [[metodo]] = await conexion.query('SELECT id, tipo FROM metodos_pago_usuario WHERE id = ? AND usuario_id = ? AND activo = 1 FOR UPDATE', [metodoId, usuarioId]);
+    if (!metodo) { await conexion.rollback(); return res.status(404).json({ error: 'No se encontró el medio de pago.' }); }
+    await conexion.query('UPDATE metodos_pago_usuario SET es_predeterminado = 0 WHERE usuario_id = ? AND activo = 1', [usuarioId]);
+    await conexion.query('UPDATE metodos_pago_usuario SET es_predeterminado = 1 WHERE id = ? AND usuario_id = ?', [metodoId, usuarioId]);
+    await conexion.query('UPDATE usuarios SET metodo_pago_preferido = ? WHERE id = ?', [metodo.tipo, usuarioId]);
+    await conexion.commit();
+    res.json({ ok: true, id: metodoId, tipo: metodo.tipo });
+  } catch (error) {
+    await conexion.rollback();
+    console.error('Error al elegir medio preferido:', error.message);
+    res.status(500).json({ error: 'No se pudo elegir el medio preferido.', ...(process.env.NODE_ENV === 'production' ? {} : { detalle: error.sqlMessage || error.message }) });
+  } finally { conexion.release(); }
+});
+
+app.delete('/api/usuarios/:id/metodos-pago/:metodoId', async (req, res) => {
+  const usuarioId = Number(req.params.id);
+  const metodoId = Number(req.params.metodoId);
+  if (!verificarSesionPropia(req, usuarioId)) return res.status(401).json({ error: 'La sesión no corresponde a esta cuenta.' });
+  try {
+    const [r] = await db.query('UPDATE metodos_pago_usuario SET activo = 0, es_predeterminado = 0 WHERE id = ? AND usuario_id = ? AND activo = 1', [metodoId, usuarioId]);
+    if (!r.affectedRows) return res.status(404).json({ error: 'No se encontró el medio de pago.' });
+    const [[siguiente]] = await db.query('SELECT id, tipo FROM metodos_pago_usuario WHERE usuario_id = ? AND activo = 1 ORDER BY id DESC LIMIT 1', [usuarioId]);
+    await db.query('UPDATE metodos_pago_usuario SET es_predeterminado = 1 WHERE id = ? AND usuario_id = ?', [siguiente?.id || 0, usuarioId]);
+    await db.query('UPDATE usuarios SET metodo_pago_preferido = ? WHERE id = ?', [siguiente?.tipo || null, usuarioId]);
+    res.json({ ok: true, id: metodoId });
+  } catch (error) {
+    console.error('Error al quitar medio de pago:', error.message);
+    res.status(500).json({ error: 'No se pudo quitar el medio de pago.', ...(process.env.NODE_ENV === 'production' ? {} : { detalle: error.sqlMessage || error.message }) });
+  }
+});
+
 // Los cambios de correo/contraseña ahora requieren el flujo de protección de cuenta.
 // Se conserva esta ruta antigua solo para devolver una indicación clara a clientes desactualizados.
 app.post('/api/usuarios/:id/password', async (_req, res) => {
@@ -783,6 +992,39 @@ app.get('/api/configuracion-tienda', async (_req, res) => {
   } catch (error) {
     console.error('Error al consultar configuración de tienda:', error.message);
     res.status(500).json({ error: 'No se pudo consultar la configuración de la tienda. Ejecutá la migración.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
+  }
+});
+
+// Calcula el envío en el servidor: el cliente solo envía su dirección y localidad.
+// El backend obtiene el local desde MySQL, ordena las consultas externas y calcula el precio final.
+app.post('/api/envios/calcular', async (req, res) => {
+  const direccionCliente = String(req.body?.direccionCliente ?? req.body?.direccion ?? '').trim();
+  const localidadCliente = String(req.body?.localidadCliente ?? req.body?.localidad ?? '').trim();
+
+  if (!direccionCliente || !localidadCliente) {
+    return res.status(400).json({ error: 'Ingresá la dirección y localidad de entrega.', paso: 'validacion' });
+  }
+  if (direccionCliente.length > 220 || localidadCliente.length > 120) {
+    return res.status(400).json({ error: 'La dirección o localidad supera el largo permitido.', paso: 'validacion' });
+  }
+
+  try {
+    const configuracionTienda = await obtenerConfiguracionTienda();
+    const resultado = await calcularEnvioDesdeBackend({
+      direccionCliente,
+      localidadCliente,
+      configuracionTienda,
+    });
+    res.json({ ok: true, ...resultado });
+  } catch (error) {
+    console.error('Error al calcular envío:', {
+      paso: error.paso || 'envio',
+      mensaje: error.message,
+    });
+    res.status(error.status || 500).json({
+      error: error.message || 'No se pudo calcular el envío.',
+      paso: error.paso || 'envio',
+    });
   }
 });
 
@@ -800,24 +1042,35 @@ app.put('/api/admin/configuracion-tienda', async (req, res) => {
     credito: b.metodosPago?.credito === false ? 0 : 1,
     debito: b.metodosPago?.debito === false ? 0 : 1,
     rapipago: b.metodosPago?.rapipago === false ? 0 : 1,
+    mercadoPago: b.metodosPago?.mercado_pago === false ? 0 : 1,
+    cuentaDni: b.metodosPago?.cuenta_dni === false ? 0 : 1,
+    modo: b.metodosPago?.modo === false ? 0 : 1,
+    naranjaX: b.metodosPago?.naranja_x === false ? 0 : 1,
+    uala: b.metodosPago?.uala === false ? 0 : 1,
+    transferencia: b.metodosPago?.transferencia === false ? 0 : 1,
   };
   if (!datos.nombre || datos.nombre.length > 120 || datos.telefono.length > 30 || datos.email.length > 150 || datos.direccion.length > 200 || datos.localidad.length > 100 || datos.descripcion.length > 500 || datos.horario.length > 120 || datos.condiciones.length > 1000 || !Number.isFinite(datos.costo) || datos.costo < 0) {
     return res.status(400).json({ error: 'Revisá los datos de la tienda y el costo de envío.' });
   }
-  if (!datos.credito && !datos.debito && !datos.rapipago) return res.status(400).json({ error: 'Debe quedar habilitado al menos un medio de pago.' });
+  if (![datos.credito, datos.debito, datos.rapipago, datos.mercadoPago, datos.cuentaDni, datos.modo, datos.naranjaX, datos.uala, datos.transferencia].some(Boolean)) return res.status(400).json({ error: 'Debe quedar habilitado al menos un medio de pago.' });
   try {
     await db.query(
       `INSERT INTO configuracion_tienda
        (id, nombre, telefono, email, direccion, localidad, descripcion, horario, condiciones_venta,
-        envio_habilitado, costo_envio_base, pago_credito_activo, pago_debito_activo, pago_rapipago_activo)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        envio_habilitado, costo_envio_base, pago_credito_activo, pago_debito_activo, pago_rapipago_activo,
+        pago_mercado_pago_activo, pago_cuenta_dni_activo, pago_modo_activo, pago_naranja_x_activo,
+        pago_uala_activo, pago_transferencia_activo)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE nombre=VALUES(nombre), telefono=VALUES(telefono), email=VALUES(email),
         direccion=VALUES(direccion), localidad=VALUES(localidad), descripcion=VALUES(descripcion), horario=VALUES(horario),
         condiciones_venta=VALUES(condiciones_venta), envio_habilitado=VALUES(envio_habilitado), costo_envio_base=VALUES(costo_envio_base),
-        pago_credito_activo=VALUES(pago_credito_activo), pago_debito_activo=VALUES(pago_debito_activo), pago_rapipago_activo=VALUES(pago_rapipago_activo)`,
+        pago_credito_activo=VALUES(pago_credito_activo), pago_debito_activo=VALUES(pago_debito_activo), pago_rapipago_activo=VALUES(pago_rapipago_activo),
+        pago_mercado_pago_activo=VALUES(pago_mercado_pago_activo), pago_cuenta_dni_activo=VALUES(pago_cuenta_dni_activo),
+        pago_modo_activo=VALUES(pago_modo_activo), pago_naranja_x_activo=VALUES(pago_naranja_x_activo),
+        pago_uala_activo=VALUES(pago_uala_activo), pago_transferencia_activo=VALUES(pago_transferencia_activo)`,
       [datos.nombre, datos.telefono || null, datos.email || null, datos.direccion || null, datos.localidad || null,
        datos.descripcion || null, datos.horario || null, datos.condiciones || null, datos.envio, datos.costo,
-       datos.credito, datos.debito, datos.rapipago]
+       datos.credito, datos.debito, datos.rapipago, datos.mercadoPago, datos.cuentaDni, datos.modo, datos.naranjaX, datos.uala, datos.transferencia]
     );
     res.json({ ok: true, configuracion: await obtenerConfiguracionTienda() });
   } catch (error) {
@@ -896,7 +1149,9 @@ app.get('/api/usuarios/:id/pedidos/:pedidoId', async (req, res) => {
               v.metodo_pago AS metodoPago, v.estado, v.estado_pedido AS estadoPedido,
               v.codigo_rapipago AS codigoRapipago, v.con_envio AS conEnvio,
               v.direccion_envio AS direccion, v.localidad_envio AS localidad,
-              v.distancia_km AS distanciaKm
+              v.direccion_alias AS direccionAlias, v.direccion_destinatario AS direccionDestinatario,
+              v.instrucciones_entrega AS instruccionesEntrega,
+              v.metodo_pago_usuario_id AS metodoPagoUsuarioId, v.distancia_km AS distanciaKm
        FROM ventas v WHERE v.usuario_id = ? AND v.id = ? LIMIT 1`,
       [usuarioId, pedidoId]
     );
@@ -935,7 +1190,10 @@ app.get('/api/usuarios/:id/pedidos', async (req, res) => {
     const [ventas] = await db.query(
       `SELECT id, id AS pedidoId, usuario_id AS usuarioId, numero, fecha, subtotal, descuento, costo_envio, total, metodo_pago AS metodoPago,
               estado, estado_pedido AS estadoPedido, codigo_rapipago AS codigoRapipago,
-              con_envio AS conEnvio, direccion_envio AS direccion, localidad_envio AS localidad, distancia_km AS distanciaKm
+              con_envio AS conEnvio, direccion_envio AS direccion, localidad_envio AS localidad,
+              direccion_alias AS direccionAlias, direccion_destinatario AS direccionDestinatario,
+              instrucciones_entrega AS instruccionesEntrega, metodo_pago_usuario_id AS metodoPagoUsuarioId,
+              distancia_km AS distanciaKm
        FROM ventas WHERE usuario_id = ? ORDER BY fecha DESC, id DESC`, [id]
     );
     for (const venta of ventas) {
@@ -968,6 +1226,10 @@ app.post('/api/ventas', async (req, res) => {
   const usuarioId = Number(req.body?.usuarioId);
   if (!verificarSesionPropia(req, usuarioId)) return res.status(401).json({ error: 'La sesión no corresponde a la cuenta que intenta comprar.' });
   const metodoPago = String(req.body?.metodoPago || '');
+  const metodoPagoUsuarioId = req.body?.metodoPagoUsuarioId == null || req.body?.metodoPagoUsuarioId === '' ? null : Number(req.body.metodoPagoUsuarioId);
+  const direccionAlias = String(req.body?.direccionAlias || '').trim();
+  const direccionDestinatario = String(req.body?.direccionDestinatario || '').trim();
+  const instruccionesEntrega = String(req.body?.instruccionesEntrega || '').trim();
   const conEnvio = Boolean(req.body?.conEnvio);
   const direccion = String(req.body?.direccion || '').trim();
   const localidad = String(req.body?.localidad || '').trim();
@@ -983,12 +1245,18 @@ app.post('/api/ventas', async (req, res) => {
     return res.status(400).json({ error: 'Completá una dirección, localidad y distancia de envío válidas.' });
   }
   if (!Number.isFinite(costoEnvioSolicitado) || costoEnvioSolicitado < 0 || costoEnvioSolicitado > 100000) return res.status(400).json({ error: 'El costo de envío no es válido.' });
+  if ((metodoPagoUsuarioId !== null && (!Number.isInteger(metodoPagoUsuarioId) || metodoPagoUsuarioId <= 0)) || direccionAlias.length > 50 || direccionDestinatario.length > 120 || instruccionesEntrega.length > 500) return res.status(400).json({ error: 'Revisá el medio guardado o las notas de entrega.' });
   let conexion;
   try {
     const [[usuario]] = await db.query('SELECT id FROM usuarios WHERE id = ? AND activo = 1', [usuarioId]);
     if (!usuario) return res.status(404).json({ error: 'La cuenta no existe o está desactivada.' });
     const tienda = await obtenerConfiguracionTienda();
     if (!tienda.metodosPago[metodoPago]) return res.status(400).json({ error: 'Ese medio de pago no está habilitado por la tienda.' });
+    if ((metodoPago === 'credito' || metodoPago === 'debito') && !metodoPagoUsuarioId) return res.status(400).json({ error: 'Registrá una tarjeta desde Configuración > Métodos de pago antes de confirmar.' });
+    if (metodoPagoUsuarioId) {
+      const [[medioGuardado]] = await db.query('SELECT id, tipo FROM metodos_pago_usuario WHERE id = ? AND usuario_id = ? AND activo = 1', [metodoPagoUsuarioId, usuarioId]);
+      if (!medioGuardado || medioGuardado.tipo !== metodoPago) return res.status(400).json({ error: 'El medio de pago guardado no pertenece a esta cuenta o no coincide con la selección.' });
+    }
     if (conEnvio && !tienda.envioHabilitado) return res.status(400).json({ error: 'La tienda no tiene habilitados los envíos a domicilio.' });
 
     // Si un cliente envía el mismo producto en dos líneas, unificamos cantidades antes de validar stock.
@@ -1046,10 +1314,12 @@ app.post('/api/ventas', async (req, res) => {
     const [resultado] = await conexion.query(
       `INSERT INTO ventas
        (numero, usuario_id, cupon_id, subtotal, descuento, costo_envio, total, metodo_pago, estado, estado_pedido,
-        codigo_rapipago, con_envio, direccion_envio, localidad_envio, distancia_km)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmado', ?, ?, ?, ?, ?)`,
+        codigo_rapipago, con_envio, direccion_envio, localidad_envio, distancia_km,
+        direccion_alias, direccion_destinatario, instrucciones_entrega, metodo_pago_usuario_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmado', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [numero, usuarioId, cuponId, subtotal, descuento, envio, total, metodoPago, estadoPago,
-       codigoRapipago || null, conEnvio ? 1 : 0, conEnvio ? direccion : null, conEnvio ? localidad : null, conEnvio ? distanciaKm : null]
+       codigoRapipago || null, conEnvio ? 1 : 0, conEnvio ? direccion : null, conEnvio ? localidad : null, conEnvio ? distanciaKm : null,
+       conEnvio ? (direccionAlias || null) : null, conEnvio ? (direccionDestinatario || null) : null, conEnvio ? (instruccionesEntrega || null) : null, metodoPagoUsuarioId]
     );
     for (const item of detalle) {
       await conexion.query(
@@ -1063,7 +1333,8 @@ app.post('/api/ventas', async (req, res) => {
       id: resultado.insertId, pedidoId: resultado.insertId, usuarioId, numero, inicio: Date.now(), subtotal, descuento, costoEnvio: envio, total,
       metodoPago, estado: 'confirmado', estadoPedido: 'confirmado', estadoPago, codigoRapipago: codigoRapipago || null,
       conEnvio, direccion: conEnvio ? direccion : null, localidad: conEnvio ? localidad : null,
-      distanciaKm: conEnvio ? distanciaKm : null, items: detalle,
+      direccionAlias: conEnvio ? direccionAlias : null, direccionDestinatario: conEnvio ? direccionDestinatario : null, instruccionesEntrega: conEnvio ? instruccionesEntrega : null,
+      metodoPagoUsuarioId, distanciaKm: conEnvio ? distanciaKm : null, items: detalle,
     });
   } catch (error) {
     if (conexion) await conexion.rollback().catch(() => {});
@@ -1084,7 +1355,9 @@ app.get('/api/admin/ventas', async (req, res) => {
       `SELECT v.id, v.numero, v.fecha, v.usuario_id AS usuarioId, u.nombre AS nombreUsuario, u.email,
               v.subtotal, v.descuento, v.costo_envio AS costoEnvio, v.total, v.metodo_pago AS metodoPago,
               v.estado AS estadoPago, v.estado_pedido AS estadoPedido, v.codigo_rapipago AS codigoRapipago,
-              v.con_envio AS conEnvio, v.direccion_envio AS direccion, v.localidad_envio AS localidad
+              v.con_envio AS conEnvio, v.direccion_envio AS direccion, v.localidad_envio AS localidad,
+              v.direccion_alias AS direccionAlias, v.direccion_destinatario AS direccionDestinatario, v.instrucciones_entrega AS instruccionesEntrega,
+              v.metodo_pago_usuario_id AS metodoPagoUsuarioId
        FROM ventas v INNER JOIN usuarios u ON u.id = v.usuario_id ORDER BY v.fecha DESC, v.id DESC LIMIT 300`
     );
     for (const venta of ventas) {
@@ -1497,42 +1770,130 @@ app.get('/api/usuarios/:id/pedidos-anticipados', async (req, res) => {
 
 app.patch('/api/admin/pedidos-anticipados/:id/estado', async (req, res) => {
   const adminId = Number(req.body?.adminId);
-  if (!await verificarPermisoAdmin(req, 'gestionar_pedidos', adminId)) return res.status(403).json({ error: 'No tenés permiso para actualizar pedidos anticipados.' });
+  if (!await verificarPermisoAdmin(req, 'gestionar_pedidos', adminId)) {
+    return res.status(403).json({ error: 'No tenÃ©s permiso para actualizar pedidos anticipados.' });
+  }
+
   const id = Number(req.params.id);
   const estado = String(req.body?.estado || '');
-  if (!Number.isInteger(id) || id <= 0 || !['confirmado', 'cancelado'].includes(estado)) return res.status(400).json({ error: 'El ID o estado no son válidos.' });
+  const estadosValidos = [
+    'confirmado', 'preparando', 'en_camino',
+    'listo_para_retirar', 'entregado', 'cancelado',
+  ];
+
+  if (!Number.isInteger(id) || id <= 0 || !estadosValidos.includes(estado)) {
+    return res.status(400).json({ error: 'El ID o estado no son vÃ¡lidos.' });
+  }
+
   const conexion = await db.getConnection();
   try {
     await conexion.beginTransaction();
-    const [[pedido]] = await conexion.query('SELECT id, producto_id AS productoId, cantidad, estado FROM pedidos_anticipados WHERE id = ? FOR UPDATE', [id]);
-    if (!pedido) { await conexion.rollback(); return res.status(404).json({ error: 'No se encontró el pedido anticipado.' }); }
-    if (!['pendiente_reposicion', 'producto_disponible'].includes(pedido.estado)) {
+
+    const [[pedido]] = await conexion.query(
+      `SELECT id, producto_id AS productoId, cantidad, estado,
+        modalidad_entrega AS modalidadEntrega
+       FROM pedidos_anticipados WHERE id = ? FOR UPDATE`,
+      [id]
+    );
+
+    if (!pedido) {
       await conexion.rollback();
-      return res.status(409).json({ error: `El pedido ya está ${pedido.estado} y no se puede modificar.` });
+      return res.status(404).json({ error: 'No se encontrÃ³ el pedido anticipado.' });
     }
+
+    // Repetir el mismo estado no vuelve a reservar ni a devolver unidades.
+    if (pedido.estado === estado) {
+      await conexion.commit();
+      return res.json({ ok: true, id, estado, sinCambios: true });
+    }
+
+    const transiciones = {
+      pendiente_reposicion: ['cancelado'],
+      producto_disponible: ['confirmado', 'cancelado'],
+      confirmado: ['preparando', 'cancelado'],
+      en_camino: ['entregado'],
+      listo_para_retirar: ['entregado'],
+    };
+
+    let permitidos = transiciones[pedido.estado] || [];
+    if (pedido.estado === 'preparando') {
+      const siguiente = pedido.modalidadEntrega === 'envio'
+        ? 'en_camino'
+        : 'listo_para_retirar';
+      permitidos = [siguiente, 'cancelado'];
+    }
+
+    if (!permitidos.includes(estado)) {
+      await conexion.rollback();
+      return res.status(409).json({
+        error: `No se puede pasar el pedido de ${pedido.estado} a ${estado}. RevisÃ¡ el estado actual y el tipo de entrega.`,
+      });
+    }
+
+    let stockReservado = false;
+    let stockDevuelto = false;
+
+    // La tienda confirma el pedido y reserva las unidades en ese momento.
     if (estado === 'confirmado') {
       if (pedido.estado !== 'producto_disponible') {
         await conexion.rollback();
-        return res.status(409).json({ error: 'Todavía no se recibió la reposición. No se puede confirmar este pedido.' });
+        return res.status(409).json({ error: 'TodavÃ­a no se recibiÃ³ la reposiciÃ³n. No se puede confirmar este pedido.' });
       }
-      const [[producto]] = await conexion.query('SELECT stock_disponible AS stockDisponible, nombre FROM productos WHERE id = ? AND activo = 1 FOR UPDATE', [pedido.productoId]);
-      if (!producto) { await conexion.rollback(); return res.status(404).json({ error: 'El producto ya no está disponible.' }); }
-      if (Number(producto.stockDisponible || 0) < Number(pedido.cantidad)) {
+
+      const [[producto]] = await conexion.query(
+        'SELECT stock_disponible AS stockDisponible FROM productos WHERE id = ? AND activo = 1 FOR UPDATE',
+        [pedido.productoId]
+      );
+
+      if (!producto) {
         await conexion.rollback();
-        return res.status(409).json({ error: `No hay unidades suficientes para confirmar. Disponibles: ${Number(producto.stockDisponible || 0)}.` });
+        return res.status(404).json({ error: 'El producto ya no estÃ¡ disponible.' });
       }
-      await conexion.query('UPDATE productos SET stock_disponible = stock_disponible - ? WHERE id = ?', [Number(pedido.cantidad), pedido.productoId]);
+
+      const stockActual = Number(producto.stockDisponible || 0);
+      if (stockActual < Number(pedido.cantidad)) {
+        await conexion.rollback();
+        return res.status(409).json({
+          error: `No hay unidades suficientes para confirmar. Disponibles: ${stockActual}.`,
+        });
+      }
+
+      await conexion.query(
+        'UPDATE productos SET stock_disponible = stock_disponible - ? WHERE id = ?',
+        [Number(pedido.cantidad), pedido.productoId]
+      );
+      stockReservado = true;
     }
-    await conexion.query('UPDATE pedidos_anticipados SET estado = ? WHERE id = ?', [estado, id]);
+
+    // Si se cancela antes del despacho, se liberan las unidades reservadas.
+    if (estado === 'cancelado' && ['confirmado', 'preparando'].includes(pedido.estado)) {
+      await conexion.query(
+        'UPDATE productos SET stock_disponible = COALESCE(stock_disponible, 0) + ? WHERE id = ?',
+        [Number(pedido.cantidad), pedido.productoId]
+      );
+      stockDevuelto = true;
+    }
+
+    await conexion.query(
+      'UPDATE pedidos_anticipados SET estado = ? WHERE id = ?',
+      [estado, id]
+    );
+
     await conexion.commit();
-    res.json({ ok: true, id, estado, stockReservado: estado === 'confirmado' });
+    res.json({ ok: true, id, estado, stockReservado, stockDevuelto });
   } catch (error) {
     await conexion.rollback().catch(() => {});
     console.error('Error al actualizar pedido anticipado:', error.message);
-    res.status(500).json({ error: 'No se pudo actualizar el pedido anticipado.', ...(process.env.NODE_ENV === 'production' ? {} : { codigo: error.code || null, detalle: error.sqlMessage || error.message }) });
-  } finally { conexion.release(); }
+    res.status(500).json({
+      error: 'No se pudo actualizar el pedido anticipado.',
+      ...(process.env.NODE_ENV === 'production'
+        ? {}
+        : { codigo: error.code || null, detalle: error.sqlMessage || error.message }),
+    });
+  } finally {
+    conexion.release();
+  }
 });
-
 // Las rutas de inventario de materias primas fueron retiradas. El stock se administra por producto terminado.
 
 // Registro de cuentas.

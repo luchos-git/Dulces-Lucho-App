@@ -1,0 +1,10 @@
+REPARACION PUNTUAL DE screens/carrito.js
+
+Problema:
+CarritoScreen intentaba ejecutar entrega.cargarConfiguracionTienda(), pero la versión de components/EntregaEnvio.js que ya estaba en el proyecto no devuelve esa función desde useEntrega(). Eso provoca "undefined is not a function" en la línea de la llamada y señala CarritoScreen en el stack.
+
+Corrección:
+Se elimina únicamente esa llamada. useEntrega() ya carga /configuracion-tienda por su propio useEffect al montarse. El efecto del carrito queda encargado solamente de refrescar productos al entrar y al volver a enfocar la pantalla.
+
+Instalación:
+Reemplazar solamente screens/carrito.js por el archivo incluido. No reemplazar prepararCompra.js, EntregaEnvio.js, server.js, envios.js ni la base de datos.

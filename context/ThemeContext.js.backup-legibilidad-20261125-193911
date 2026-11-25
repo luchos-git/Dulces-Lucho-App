@@ -1,0 +1,288 @@
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { StyleSheet, Text as NativeText, TextInput as NativeTextInput } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { StatusBar } from 'expo-status-bar';
+
+const CLAVE_TEMA = 'dulces_lucho_apariencia';
+const ESTILO_DEFAULT_TEXTO = NativeText.defaultProps?.style;
+
+export const TEMAS = {
+  claro: {
+    nombre: 'Claro cálido',
+    background: '#FFF8E1',
+    surface: '#FFFFFF',
+    surfaceAlt: '#FFE0B2',
+    text: '#35230E',
+    muted: '#765F43',
+    primary: '#A86616',
+    border: '#F3EBDD',
+    input: '#FFFCF7',
+    inputBorder: '#E8D9C2',
+    placeholder: '#9A8B78',
+    danger: '#B42318',
+    successText: '#24643B', successSurface: '#E8F5E9', successBorder: '#B8D9BF',
+    warningText: '#875400', warningSurface: '#FFF1D6', warningBorder: '#F0D09A',
+    dangerSurface: '#FCE8E6', dangerBorder: '#F2C7C4',
+    header: '#FFFFFF',
+  },
+  tibio: {
+    nombre: 'Colores tibios',
+    background: '#F1E7DC',
+    surface: '#FFF9F1',
+    surfaceAlt: '#E8D4BF',
+    text: '#493A2C',
+    muted: '#86715E',
+    primary: '#A96F43',
+    border: '#E2D1BF',
+    input: '#FFFBF6',
+    inputBorder: '#D9C5B0',
+    placeholder: '#9A8877',
+    danger: '#C96E65',
+    successText: '#36764A', successSurface: '#E4F0E4', successBorder: '#C3DCC5',
+    warningText: '#9A6125', warningSurface: '#F8E9CF', warningBorder: '#E7D0A8',
+    dangerSurface: '#F7E2DE', dangerBorder: '#E8C4BE',
+    header: '#FFF9F1',
+  },
+  oscuro: {
+    nombre: 'Oscuro',
+    background: '#171513',
+    surface: '#24211E',
+    surfaceAlt: '#393128',
+    text: '#F5EBDD',
+    muted: '#C0B29E',
+    primary: '#E5B36B',
+    border: '#4D4338',
+    input: '#2C2721',
+    inputBorder: '#615342',
+    placeholder: '#AFA08D',
+    danger: '#F08B82',
+    successText: '#A5D6A7', successSurface: '#263C2E', successBorder: '#42664B',
+    warningText: '#F0D09A', warningSurface: '#40321F', warningBorder: '#665237',
+    dangerSurface: '#432723', dangerBorder: '#70423D',
+    header: '#24211E',
+  },
+};
+
+let temaActivo = 'claro';
+
+const MAPA_COLORES = {
+  '#fff8e1': 'background', '#fff3d6': 'background',
+  '#ffe0b2': 'surfaceAlt', '#ffe8c5': 'surfaceAlt', '#fff0d8': 'surfaceAlt',
+  '#fff0c2': 'surfaceAlt', '#ffe7a8': 'surfaceAlt', '#ffcc80': 'surfaceAlt', '#ffd995': 'surfaceAlt',
+  '#333': 'text', '#333333': 'text', '#35230e': 'text', '#38240d': 'text', '#493116': 'text', '#39280f': 'text', '#33220d': 'text',
+  '#51402c': 'text', '#55432b': 'text', '#65420f': 'text', '#493a2c': 'text',
+  '#765f43': 'muted', '#6f5b43': 'muted', '#806b4e': 'muted', '#8a785d': 'muted',
+  '#888': 'muted', '#999': 'muted', '#999999': 'muted', '#888888': 'muted', '#777': 'muted', '#777777': 'muted', '#666': 'muted',
+  '#555': 'muted', '#555555': 'muted', '#51402c': 'text', '#8a6b45': 'muted', '#80500f': 'muted',
+  '#805f35': 'muted', '#f3ebdd': 'border', '#f1e7d8': 'border', '#e8d9c2': 'inputBorder',
+  '#eedcc2': 'inputBorder', '#eee': 'border', '#eeeeee': 'border', '#ddd': 'border', '#dddddd': 'border',
+  '#a86616': 'primary', '#a66a12': 'primary', '#a45f00': 'primary', '#b17b32': 'primary',
+  '#c77b00': 'primary', '#89530d': 'primary', '#007bff': 'primary',
+  '#fffcf7': 'input', '#fffcf6': 'input', '#fffcf5': 'input',
+  '#fff3e0': 'surfaceAlt', '#fffdf8': 'surface', '#fff4df': 'surfaceAlt', '#f7f0e5': 'background',
+  '#fff3df': 'surfaceAlt', '#fff1d6': 'surfaceAlt', '#f1e3cb': 'surfaceAlt', '#efe1cb': 'surfaceAlt',
+  '#f7ebd5': 'surfaceAlt', '#e8d4bf': 'surfaceAlt', '#ffe8b8': 'surfaceAlt', '#ffe4b5': 'surfaceAlt',
+  '#ffe1b8': 'surfaceAlt', '#fff4df': 'surfaceAlt', '#e7c48d': 'border',
+  '#d6c6b2': 'border', '#e8d8c2': 'border', '#ead9ba': 'border', '#ead7bd': 'border',
+  '#ccc': 'border', '#cccccc': 'border', '#aaa': 'muted', '#aaaaaa': 'muted', '#b0bec5': 'border',
+  '#66533d': 'muted', '#79664d': 'muted', '#65533b': 'muted', '#6b4b27': 'muted', '#3d2a0d': 'text',
+  '#8b4e00': 'primary', '#6b3f0e': 'primary', '#71440b': 'muted', '#745f44': 'muted', '#51350f': 'text',
+  '#79552a': 'muted', '#98764d': 'muted', '#67400f': 'muted', '#56452e': 'muted', '#9a8465': 'muted',
+  '#8a6b45': 'muted', '#5c3c12': 'text', '#7b5b2a': 'muted', '#a78b63': 'muted', '#8d4b00': 'primary',
+  '#b64d3b': 'danger', '#a12622': 'danger', '#a61b1b': 'danger', '#8a2d20': 'danger',
+  '#b42318': 'danger', '#e57373': 'danger',
+  '#24643b': 'successText', '#267444': 'successText', '#2e7d32': 'successText',
+  '#a5d6a7': 'successSurface', '#b8d9bf': 'successBorder', '#c8e6c9': 'successSurface',
+  '#dcefe0': 'successSurface', '#e1f1e4': 'successSurface', '#e8f5e9': 'successSurface',
+  '#eaf6ec': 'successSurface', '#f1f8e9': 'successSurface',
+  '#875400': 'warningText', '#9a4b00': 'warningText', '#f0d09a': 'warningBorder',
+  '#f0b6b2': 'dangerBorder', '#f2c7c4': 'dangerBorder', '#f8d7da': 'dangerSurface',
+  '#fce8e6': 'dangerSurface', '#fde8e7': 'dangerSurface',
+  '#d7b77d': 'inputBorder', '#d8b679': 'inputBorder',
+  '#e8a23a': 'primary', '#e5a33a': 'primary', '#e69a26': 'primary', '#c48b39': 'primary', '#d99b3c': 'primary',
+  '#b26a00': 'primary', '#a85d00': 'primary', '#d69a24': 'primary',
+};
+
+export function getThemeColors() {
+  return TEMAS[temaActivo] || TEMAS.claro;
+}
+
+function convertirColor(valor, propiedad) {
+  if (typeof valor !== 'string') return valor;
+  const normalizado = valor.trim().toLowerCase();
+  if (normalizado === '#e3f2fd' && String(propiedad).toLowerCase() === 'color') return temaActivo === 'oscuro' ? getThemeColors().text : '#FFFFFF';
+  if (normalizado === '#fff' || normalizado === '#ffffff' || normalizado === 'white') {
+    const prop = String(propiedad).toLowerCase();
+    if (prop === 'color' || prop === 'tintcolor') return '#FFFFFF';
+    if (prop.includes('background')) return getThemeColors().surface;
+    if (prop.includes('border')) return getThemeColors().border;
+  }
+  if ((normalizado === '#000' || normalizado === '#000000' || normalizado === 'black')
+      && ['color', 'tintcolor'].includes(String(propiedad).toLowerCase())) return getThemeColors().text;
+  const clave = MAPA_COLORES[normalizado];
+  if (clave) return getThemeColors()[clave];
+
+  // En modo oscuro, muchos textos antiguos tienen marrones/negros escritos
+  // directamente en hexadecimal. Si no están en el mapa semántico y son
+  // demasiado oscuros, se sustituyen por el color de texto del tema.
+  const propiedadNormalizada = String(propiedad).toLowerCase();
+  if (temaActivo === 'oscuro' && ['color', 'tintcolor'].includes(propiedadNormalizada)) {
+    const hex = normalizado.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (hex) {
+      let valorHex = hex[1];
+      if (valorHex.length === 3) valorHex = valorHex.split('').map((caracter) => caracter + caracter).join('');
+      const canales = [0, 2, 4].map((indice) => parseInt(valorHex.slice(indice, indice + 2), 16) / 255);
+      const lineal = canales.map((canal) => canal <= 0.04045 ? canal / 12.92 : ((canal + 0.055) / 1.055) ** 2.4);
+      const luminancia = 0.2126 * lineal[0] + 0.7152 * lineal[1] + 0.0722 * lineal[2];
+      if (luminancia < 0.30) return getThemeColors().text;
+    }
+  }
+  return valor;
+}
+
+// Conserva los estilos originales, pero resuelve sus colores con el tema activo.
+// Así no es necesario duplicar cada hoja de estilos para cada apariencia.
+export function createThemedStyles(definicion) {
+  const base = StyleSheet.create(definicion);
+  return new Proxy({}, {
+    get(_target, propiedad) {
+      const estilo = base[propiedad];
+      if (!estilo || typeof estilo !== 'object' || Array.isArray(estilo)) return estilo;
+      const resultado = {};
+      Object.keys(estilo).forEach((clave) => {
+        resultado[clave] = typeof estilo[clave] === 'string'
+          ? convertirColor(estilo[clave], clave)
+          : estilo[clave];
+      });
+      const contieneTipografia = ['fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'textAlign', 'textTransform', 'textDecorationLine'].some((prop) => prop in estilo);
+      const esCampoTexto = /input|textinput|fieldtext/i.test(String(propiedad));
+      if ((contieneTipografia || esCampoTexto) && !('color' in resultado)) {
+        resultado.color = getThemeColors().text;
+      }
+      return resultado;
+    },
+  });
+}
+
+const ThemeContext = createContext({
+  themeName: 'claro',
+  colors: TEMAS.claro,
+  cambiarTema: async () => {},
+});
+
+export function ThemeProvider({ children }) {
+  const [themeName, setThemeName] = useState('claro');
+  const [cargado, setCargado] = useState(false);
+
+  useEffect(() => {
+    let vigente = true;
+    AsyncStorage.getItem(CLAVE_TEMA)
+      .then((guardado) => {
+        if (vigente && TEMAS[guardado]) setThemeName(guardado);
+      })
+      .catch((error) => console.warn('No se pudo recuperar la apariencia:', error.message))
+      .finally(() => { if (vigente) setCargado(true); });
+    return () => { vigente = false; };
+  }, []);
+
+  temaActivo = themeName;
+  // Se asigna antes de renderizar las pantallas para que también los <Text>
+  // sin style explícito respeten el color de la apariencia seleccionada.
+  NativeText.defaultProps = {
+    ...(NativeText.defaultProps || {}),
+    style: [ESTILO_DEFAULT_TEXTO, { color: TEMAS[themeName].text }],
+  };
+
+  const cambiarTema = useCallback(async (nuevoTema) => {
+    if (!TEMAS[nuevoTema]) return;
+    temaActivo = nuevoTema;
+    setThemeName(nuevoTema);
+    try {
+      await AsyncStorage.setItem(CLAVE_TEMA, nuevoTema);
+    } catch (error) {
+      console.warn('No se pudo guardar la apariencia:', error.message);
+    }
+  }, []);
+
+  const value = useMemo(() => ({ themeName, colors: TEMAS[themeName], cambiarTema, cargado }), [themeName, cambiarTema, cargado]);
+
+  return (
+    <ThemeContext.Provider value={value}>
+      <StatusBar style={themeName === 'oscuro' ? 'light' : 'dark'} backgroundColor={TEMAS[themeName].background} />
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+
+
+// Convierte cualquier color de texto oscuro a un tono legible en modo oscuro.
+// Incluye hexadecimal, rgb()/rgba() y nombres básicos, incluso si el color
+// viene de un estilo inline antiguo y no de createThemedStyles.
+function luminanciaColor(valor) {
+  if (typeof valor !== 'string') return null;
+  const color = valor.trim().toLowerCase();
+  if (['black', 'darkgray', 'darkgrey', 'dimgray', 'dimgrey', 'navy'].includes(color)) return 0.04;
+  if (['white', 'whitesmoke'].includes(color)) return 1;
+  let canales = null;
+  const hex = color.match(/^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+  if (hex) {
+    let raw = hex[1];
+    if (raw.length === 3 || raw.length === 4) raw = raw.slice(0, 3).split('').map((c) => c + c).join('');
+    else raw = raw.slice(0, 6);
+    canales = [0, 2, 4].map((i) => parseInt(raw.slice(i, i + 2), 16));
+  } else {
+    const rgb = color.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/);
+    if (rgb) canales = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+  }
+  if (!canales) return null;
+  const lineales = canales.map((canal) => {
+    const normal = Math.max(0, Math.min(255, canal)) / 255;
+    return normal <= 0.04045 ? normal / 12.92 : ((normal + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * lineales[0] + 0.7152 * lineales[1] + 0.0722 * lineales[2];
+}
+
+function colorTextoLegible(color, colors, themeName) {
+  if (!color) return colors.text;
+  if (themeName !== 'oscuro') return color;
+  const luminancia = luminanciaColor(color);
+  // Umbral deliberadamente generoso para evitar grises, negros y marrones
+  // que se pierden sobre las superficies oscuras.
+  if (luminancia !== null && luminancia < 0.42) return colors.text;
+  return color;
+}
+
+export function ThemedText({ style, ...props }) {
+  const { colors, themeName } = useAppTheme();
+  const plano = StyleSheet.flatten(style) || {};
+  const color = colorTextoLegible(plano.color, colors, themeName);
+  return <NativeText {...props} style={[style, { color }]} />;
+}
+
+export function ThemedTextInput({ style, placeholderTextColor, selectionColor, ...props }) {
+  const { colors, themeName } = useAppTheme();
+  const plano = StyleSheet.flatten(style) || {};
+  const color = colorTextoLegible(plano.color, colors, themeName);
+  return (
+    <NativeTextInput
+      {...props}
+      placeholderTextColor={colorTextoLegible(placeholderTextColor, colors, themeName) === colors.text ? colors.placeholder : (placeholderTextColor || colors.placeholder)}
+      selectionColor={selectionColor || colors.primary}
+      style={[style, { color }]}
+    />
+  );
+}
+
+export function useAppTheme() {
+  return useContext(ThemeContext);
+}
+
+// Fuerza el refresco de las pantallas registradas cuando cambia la apariencia.
+export function withThemeRefresh(Component) {
+  function PantallaConTema(props) {
+    useAppTheme();
+    return <Component {...props} />;
+  }
+  PantallaConTema.displayName = `ConTema(${Component.displayName || Component.name || 'Pantalla'})`;
+  return PantallaConTema;
+}
